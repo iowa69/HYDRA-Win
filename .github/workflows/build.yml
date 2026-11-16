@@ -1,0 +1,101 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-build.txt
+
+      - name: Unit tests
+        run: python -m pytest -q
+
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          version=$(python -c "import sys; sys.path.insert(0, 'src'); import hydra_win; print(hydra_win.__version__)")
+          if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF#refs/tags/v}" != "$version" ]]; then
+            echo "tag ${GITHUB_REF#refs/tags/} does not match version $version"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "zip=Hydra-win-v$version-windows-x64.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Build Hydra-win.exe (PyInstaller, one folder, windowed)
+        run: python -m PyInstaller packaging/hydra-win.spec --noconfirm --clean
+
+      - name: Bundle NCBI BLAST+
+        run: python tools/ci.py blast dist/Hydra-win
+
+      - name: Build the redistributable databases with the packaged exe
+        run: python tools/ci.py build-db dist/Hydra-win
+
+      - name: Zip
+        run: python tools/ci.py package dist/Hydra-win "release/${{ steps.version.outputs.zip }}"
+
+      - name: Smoke test the packaged exe (first launch, --cli, --cumulative)
+        run: python tools/ci.py smoke "release/${{ steps.version.outputs.zip }}" "${{ runner.temp }}/smoke"
+
+      - name: Smoke test the window
+        run: python tools/ci.py gui-smoke dist/Hydra-win "${{ runner.temp }}/smoke"
+
+      - name: Upload smoke-test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test
+          path: |
+            ${{ runner.temp }}/smoke/smoke-results
+            ${{ runner.temp }}/smoke/*.log
+            ${{ runner.temp }}/smoke/*.json
+            ${{ runner.temp }}/smoke/gui-screenshot.png
+            dist/build-db.log
+            dist/db-status.json
+          if-no-files-found: warn
+
+      - name: Upload zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: hydra-win-zip
+          path: release/${{ steps.version.outputs.zip }}
+          compression-level: 0
+
+  release:
+    needs: windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: hydra-win-zip
+          path: release
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          zip=$(ls release/*.zip)
+          gh release create "$GITHUB_REF_NAME" "$zip" \
+            --title "Hydra-win $GITHUB_REF_NAME" \
+            --notes-file packaging/RELEASE_NOTES.md

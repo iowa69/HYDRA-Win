@@ -1,0 +1,746 @@
+"""Excel workbooks: one per genome, plus the optional cumulative workbook.
+
+Both are built from upstream :class:`hydra_amr.records.SampleResult` objects
+with openpyxl only. Colours are written as explicit cell fills rather than
+conditional formatting, so they look the same in Excel, LibreOffice and any
+viewer, and the tests can check them.
+"""
+
+from __future__ import annotations
+
+import re
+from collections import OrderedDict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Sequence
+
+from openpyxl import Workbook
+from openpyxl.comments import Comment
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.worksheet import Worksheet
+
+from hydra_amr.records import Hit, SampleResult
+
+# ---------------------------------------------------------------- categories
+AMR = "AMR"
+STRESS = "Stress"
+MUTATION = "Point mutation"
+VIRULENCE = "Virulence"
+PLASMID = "Plasmid"
+TYPING = "Typing"
+OTHER = "Other"
+CATEGORY_ORDER = (AMR, STRESS, MUTATION, VIRULENCE, PLASMID, TYPING, OTHER)
+
+#: Per-genome sheet names, in workbook order.
+GENOME_SHEETS = ("Summary", "AMR_genes", "Point_mutations", "Virulence", "Plasmids",
+                 "Typing", "All_hits", "Pivot")
+#: Cumulative workbook sheet names, in workbook order.
+CUMULATIVE_SHEETS = ("Summary", "AMR_matrix", "Mutations_matrix", "Virulence_matrix",
+                     "Plasmids_matrix", "All_hits")
+
+MUTATION_METHODS = ("POINTX", "POINTN", "POINTP", "POINTR", "DISRUPTX", "SUSCEPTIBLEX")
+
+
+def category(hit: Hit) -> str:
+    """The workbook category a hit belongs to."""
+    if hit.resolution == "POINT" or hit.method in MUTATION_METHODS:
+        return MUTATION
+    etype = (hit.element_type or "").upper()
+    if etype == "AMR":
+        return AMR
+    if etype == "STRESS":
+        return STRESS
+    if etype == "VIRULENCE":
+        return VIRULENCE
+    if etype == "PLASMID":
+        return PLASMID
+    if etype in ("SEROTYPE", "TYPING"):
+        return TYPING
+    return OTHER
+
+
+def label(hit: Hit) -> str:
+    """Gene name, or the mutation itself (``gyrA_S83L``) for a point mutation."""
+    if category(hit) == MUTATION and hit.note:
+        first = hit.note.split()[0].rstrip(";,")
+        if first.startswith(hit.gene) and first != hit.gene:
+            return first
+    return hit.gene
+
+
+#: Which categories each raw sheet holds.
+SHEET_CATEGORIES = {
+    "AMR_genes": (AMR, STRESS),
+    "Point_mutations": (MUTATION,),
+    "Virulence": (VIRULENCE,),
+    "Plasmids": (PLASMID,),
+}
+
+# --------------------------------------------------------------------- style
+HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
+HEADER_FONT = Font(bold=True, color="FFFFFF")
+TITLE_FONT = Font(bold=True, size=14, color="1F4E78")
+SECTION_FILL = PatternFill("solid", fgColor="D9E1F2")
+SECTION_FONT = Font(bold=True, color="1F4E78")
+REDUNDANT_FONT = Font(color="808080")
+PARTIAL_FONT = Font(italic=True)
+THIN = Side(style="thin", color="BFBFBF")
+CELL_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+
+#: (lower bound of %identity, fill colour, legend label), best first.
+IDENTITY_BANDS = (
+    (99.95, "63BE7B", "100%"),
+    (98.0, "A9D18E", "98-99.9%"),
+    (95.0, "FFEB84", "95-97.9%"),
+    (90.0, "FFC266", "90-94.9%"),
+    (0.0, "F8696B", "<90%"),
+)
+MUTATION_COLOUR = "8EA9DB"
+CATEGORY_COLOURS = {
+    AMR: "FCE4D6", STRESS: "FFF2CC", MUTATION: "DDEBF7", VIRULENCE: "E2EFDA",
+    PLASMID: "EDE7F6", TYPING: "EDEDED", OTHER: "FFFFFF",
+}
+
+
+def identity_colour(identity: float | None) -> str | None:
+    if identity is None:
+        return None
+    for floor, colour, _label in IDENTITY_BANDS:
+        if identity >= floor:
+            return colour
+    return IDENTITY_BANDS[-1][1]
+
+
+def _fill(colour: str | None) -> PatternFill | None:
+    return PatternFill("solid", fgColor=colour) if colour else None
+
+
+_ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _clean(value):
+    """Excel refuses control characters; strip them from free text."""
+    if isinstance(value, str):
+        return _ILLEGAL.sub("", value)
+    return value
+
+
+# ---------------------------------------------------------------- hit tables
+HIT_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("Contig", "sequence"),
+    ("Start", "start"),
+    ("End", "end"),
+    ("Strand", "strand"),
+    ("Gene", "gene"),
+    ("Database", "database"),
+    ("Identity (%)", "identity_pct"),
+    ("Coverage (%)", "coverage_pct"),
+    ("Drug class", "drug_class"),
+    ("Subclass", "subclass"),
+    ("Product", "product"),
+    ("Accession", "accession"),
+    ("Element type", "element_type"),
+    ("Element subtype", "element_subtype"),
+    ("Method", "method"),
+    ("Resolution", "resolution"),
+    ("Reference span", "coverage"),
+    ("Gaps", "gaps"),
+    ("Primary call", "primary"),
+    ("Note", "note"),
+)
+
+
+def hit_values(hit: Hit) -> list:
+    out = []
+    for _title, attr in HIT_COLUMNS:
+        value = getattr(hit, attr)
+        if attr in ("identity_pct", "coverage_pct"):
+            value = round(float(value), 2)
+        elif attr == "primary":
+            value = "yes" if value else "no (same locus as a better call)"
+        out.append(_clean(value))
+    return out
+
+
+def sort_hits(hits: Iterable[Hit]) -> list[Hit]:
+    return sorted(hits, key=lambda h: (CATEGORY_ORDER.index(category(h)), h.sequence,
+                                       min(h.start, h.end), h.gene, h.database))
+
+
+def _write_header(ws: Worksheet, row: int, titles: Sequence[str], rotate: bool = False) -> None:
+    for col, title in enumerate(titles, start=1):
+        cell = ws.cell(row=row, column=col, value=title)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.border = CELL_BORDER
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=not rotate,
+                                   text_rotation=90 if rotate else 0)
+
+
+def _autosize(ws: Worksheet, minimum: int = 6, maximum: int = 60,
+              skip_rows: int = 0) -> None:
+    widths: dict[int, int] = {}
+    for row in ws.iter_rows(min_row=skip_rows + 1):
+        for cell in row:
+            if cell.value is None:
+                continue
+            text = str(cell.value)
+            length = max((len(part) for part in text.split("\n")), default=0)
+            widths[cell.column] = max(widths.get(cell.column, 0), length)
+    for column, width in widths.items():
+        ws.column_dimensions[get_column_letter(column)].width = max(minimum, min(maximum, width + 2))
+
+
+def write_hit_table(ws: Worksheet, hits: Sequence[Hit], *, leading: Sequence[tuple[str, object]] = (),
+                    with_category: bool = False) -> int:
+    """Write *hits* as a filterable table. Returns the number of data rows."""
+    lead_titles = [title for title, _ in leading]
+    titles = lead_titles + (["Category"] if with_category else []) + [t for t, _ in HIT_COLUMNS]
+    _write_header(ws, 1, titles)
+    identity_col = titles.index("Identity (%)") + 1
+    row = 1
+    for item in hits:
+        hit, lead_values = (item if isinstance(item, tuple) else (item, ()))
+        row += 1
+        values = list(lead_values) + ([category(hit)] if with_category else []) + hit_values(hit)
+        for col, value in enumerate(values, start=1):
+            cell = ws.cell(row=row, column=col, value=value)
+            cell.border = CELL_BORDER
+            if not hit.primary:
+                cell.font = REDUNDANT_FONT
+        id_cell = ws.cell(row=row, column=identity_col)
+        colour = MUTATION_COLOUR if category(hit) == MUTATION else identity_colour(hit.identity_pct)
+        if colour:
+            id_cell.fill = _fill(colour)
+        if hit.resolution == "PARTIAL":
+            ws.cell(row=row, column=identity_col + 1).font = PARTIAL_FONT
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(titles))}{max(row, 1)}"
+    _autosize(ws, maximum=50)
+    return row - 1
+
+
+# ---------------------------------------------------------------- summaries
+SCORE_LABELS = OrderedDict([
+    ("resistance_score", "Resistance score (0-3)"),
+    ("has_esbl", "ESBL"),
+    ("has_carbapenemase", "Carbapenemase"),
+    ("has_colistin_resistance", "Colistin resistance"),
+    ("virulence_score", "Virulence score"),
+    ("virulence_score_basis", "Virulence score basis"),
+])
+
+QC_LABELS = OrderedDict([
+    ("contigs", "Contigs"), ("total_length", "Total length (bp)"), ("n50", "N50 (bp)"),
+    ("n90", "N90 (bp)"), ("largest_contig", "Largest contig (bp)"),
+    ("gc_percent", "GC (%)"), ("ambiguous_bases", "Ambiguous bases"),
+])
+
+COUNT_LABELS = OrderedDict([
+    (AMR, "AMR genes"), (STRESS, "Stress genes (biocide/metal/heat)"),
+    (MUTATION, "Point mutations / disruptions"), (VIRULENCE, "Virulence genes"),
+    (PLASMID, "Plasmid replicons"), (TYPING, "Serotype loci"),
+])
+
+
+def _yes_no(value):
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return value
+
+
+def primary_genes(result: SampleResult, cat: str) -> list[str]:
+    """Distinct gene names of the primary calls in one category, in order."""
+    seen: "OrderedDict[str, None]" = OrderedDict()
+    for hit in sort_hits(h for h in result.hits if h.primary and category(h) == cat):
+        seen.setdefault(label(hit), None)
+    return list(seen)
+
+
+def category_counts(result: SampleResult) -> dict[str, int]:
+    return {cat: len(primary_genes(result, cat)) for cat in COUNT_LABELS}
+
+
+def amr_classes(result: SampleResult) -> list[str]:
+    classes = sorted({h.drug_class for h in result.hits
+                      if h.primary and category(h) == AMR and h.drug_class})
+    return classes
+
+
+def typing_label(scheme: str) -> str:
+    return scheme.replace("__", " ").replace("_", " ")
+
+
+def species_text(result: SampleResult) -> str:
+    return result.species.name if result.species else "unknown"
+
+
+@dataclass
+class RunInfo:
+    """Run-level facts stamped into every workbook."""
+
+    app_version: str = ""
+    upstream: str = ""
+    date: str = ""
+    databases: str = ""
+    missing_databases: str = ""
+    thresholds: str = ""
+    notes: str = ""
+
+
+def _kv(ws: Worksheet, row: int, key: str, value, *, colour: str | None = None) -> int:
+    key_cell = ws.cell(row=row, column=1, value=key)
+    key_cell.font = Font(bold=True)
+    key_cell.border = CELL_BORDER
+    value_cell = ws.cell(row=row, column=2, value=_clean(_yes_no(value)))
+    value_cell.border = CELL_BORDER
+    value_cell.alignment = Alignment(wrap_text=True, vertical="top")
+    if colour:
+        value_cell.fill = _fill(colour)
+    return row + 1
+
+
+def _section(ws: Worksheet, row: int, title: str) -> int:
+    for col in (1, 2):
+        cell = ws.cell(row=row, column=col, value=title if col == 1 else None)
+        cell.fill = SECTION_FILL
+        cell.font = SECTION_FONT
+    return row + 1
+
+
+def write_genome_summary(ws: Worksheet, result: SampleResult, info: RunInfo) -> None:
+    ws.cell(row=1, column=1, value=f"Hydra-win report: {result.sample}").font = TITLE_FONT
+    row = 3
+    row = _section(ws, row, "Identification")
+    row = _kv(ws, row, "Assembly", result.sample)
+    row = _kv(ws, row, "Input file", "; ".join(Path(p).name for p in result.inputs))
+    sp = result.species
+    row = _kv(ws, row, "Species", sp.name)
+    row = _kv(ws, row, "Species confidence", sp.confidence)
+    row = _kv(ws, row, "Species evidence", sp.evidence or "-")
+    row = _kv(ws, row, "Mutation catalogue (AMRFinderPlus organism)", sp.organism or "-")
+    m = result.mlst
+    row = _kv(ws, row, "MLST scheme", m.scheme)
+    row = _kv(ws, row, "MLST ST", m.sequence_type)
+    row = _kv(ws, row, "MLST profile", m.profile)
+    row = _kv(ws, row, "MLST loci found",
+              f"{m.loci_found}/{m.loci_total}" if m.loci_total else "-")
+    if m.note:
+        row = _kv(ws, row, "MLST note", m.note)
+
+    row += 1
+    row = _section(ws, row, "Scores")
+    for key, label in SCORE_LABELS.items():
+        if key in result.scores:
+            row = _kv(ws, row, label, result.scores[key])
+
+    row += 1
+    row = _section(ws, row, "Counts (distinct genes, primary calls)")
+    counts = category_counts(result)
+    for cat, label in COUNT_LABELS.items():
+        row = _kv(ws, row, label, counts[cat], colour=CATEGORY_COLOURS[cat])
+    row = _kv(ws, row, "AMR drug classes", len(amr_classes(result)))
+    row = _kv(ws, row, "All hits (incl. redundant database calls)", len(result.hits))
+
+    row += 1
+    row = _section(ws, row, "Detected (primary calls)")
+    for cat in (AMR, STRESS, MUTATION, VIRULENCE, PLASMID):
+        genes = primary_genes(result, cat)
+        row = _kv(ws, row, f"{COUNT_LABELS[cat]} (names)", ", ".join(genes) if genes else "none")
+    row = _kv(ws, row, "AMR drug classes (names)", ", ".join(amr_classes(result)) or "none")
+
+    row += 1
+    row = _section(ws, row, "Typing")
+    if result.typing:
+        for typing in result.typing:
+            call = typing.call
+            if typing.lineage not in ("-", "", None):
+                call = f"{call} (lineage {typing.lineage})"
+            row = _kv(ws, row, typing_label(typing.scheme), call)
+    else:
+        row = _kv(ws, row, "Lineage / serotype typing", "no scheme applies to this species")
+
+    row += 1
+    row = _section(ws, row, "Assembly QC")
+    for key, label in QC_LABELS.items():
+        if key in result.qc:
+            row = _kv(ws, row, label, result.qc[key])
+    row = _kv(ws, row, "Warnings", "; ".join(result.warnings) or "none")
+
+    row += 1
+    row = _section(ws, row, "Run")
+    for label, value in (("Hydra-win version", info.app_version),
+                         ("Upstream Hydra", info.upstream), ("Date", info.date),
+                         ("Databases (version)", info.databases),
+                         ("Databases not available", info.missing_databases or "none"),
+                         ("Thresholds", info.thresholds), ("Notes", info.notes)):
+        row = _kv(ws, row, label, value)
+    ws.column_dimensions["A"].width = 44
+    ws.column_dimensions["B"].width = 100
+    ws.freeze_panes = "A3"
+
+
+TYPING_COLUMNS = ("Type", "Scheme / database", "Call", "Lineage / detail", "Alleles / profile",
+                  "Loci found", "Contig", "Start", "End", "Strand", "Identity (%)",
+                  "Coverage (%)", "Note")
+
+
+def typing_rows(result: SampleResult) -> list[list]:
+    rows: list[list] = []
+    sp = result.species
+    rows.append(["Species", "MLST scheme map" if sp.evidence else "-", sp.name, sp.confidence,
+                 "", "", "", None, None, "", None, None, sp.evidence])
+    m = result.mlst
+    rows.append(["MLST", m.scheme, m.sequence_type, m.source if m.scheme != "-" else "-",
+                 m.profile, f"{m.loci_found}/{m.loci_total}" if m.loci_total else "-",
+                 "", None, None, "", round(m.similarity, 2) if m.similarity else None, None,
+                 m.note])
+    for typing in result.typing:
+        alleles = " ".join(f"{k}({v})" for k, v in sorted(typing.alleles.items()))
+        rows.append(["Lineage / element typing", typing_label(typing.scheme), typing.call,
+                     typing.lineage, alleles,
+                     f"{typing.loci_found}/{typing.loci_total}" if typing.loci_total else "-",
+                     "", None, None, "", None, None, typing.note])
+    for hit in sort_hits(h for h in result.hits if category(h) == TYPING):
+        rows.append(["Serotype locus", hit.database, hit.gene, hit.product, "", "",
+                     hit.sequence, hit.start, hit.end, hit.strand, round(hit.identity_pct, 2),
+                     round(hit.coverage_pct, 2), hit.note])
+    return rows
+
+
+def write_typing(ws: Worksheet, result: SampleResult) -> int:
+    _write_header(ws, 1, TYPING_COLUMNS)
+    rows = typing_rows(result)
+    for r, values in enumerate(rows, start=2):
+        for c, value in enumerate(values, start=1):
+            cell = ws.cell(row=r, column=c, value=_clean(value))
+            cell.border = CELL_BORDER
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(TYPING_COLUMNS))}{len(rows) + 1}"
+    _autosize(ws, maximum=60)
+    return len(rows)
+
+
+# --------------------------------------------------------------------- pivot
+@dataclass
+class Locus:
+    """One genomic locus and every database call made on it."""
+
+    primary: Hit
+    calls: list[Hit]
+
+    @property
+    def category(self) -> str:
+        return category(self.primary)
+
+
+def _overlap(a: Hit, b: Hit) -> bool:
+    lo_a, hi_a = sorted((a.start, a.end))
+    lo_b, hi_b = sorted((b.start, b.end))
+    shared = min(hi_a, hi_b) - max(lo_a, lo_b) + 1
+    return shared >= 0.6 * min(hi_a - lo_a + 1, hi_b - lo_b + 1)
+
+
+def group_loci(hits: Sequence[Hit]) -> list[Locus]:
+    """Attach each redundant call to the primary call on the same locus.
+
+    Mirrors upstream's own rule (same contig and element type, >= 60% overlap),
+    which is how it chose one primary call per locus in the first place.
+    """
+    loci = [Locus(primary=h, calls=[h]) for h in hits if h.primary]
+    for hit in hits:
+        if hit.primary:
+            continue
+        home = next((locus for locus in loci
+                     if locus.category != MUTATION
+                     and locus.primary.sequence == hit.sequence
+                     and locus.primary.element_type == hit.element_type
+                     and _overlap(locus.primary, hit)), None)
+        if home is None:
+            loci.append(Locus(primary=hit, calls=[hit]))
+        else:
+            home.calls.append(hit)
+    loci.sort(key=lambda lc: (CATEGORY_ORDER.index(lc.category),
+                              (lc.primary.drug_class or "~").upper(), lc.primary.gene.upper()))
+    return loci
+
+
+def _database_columns(hits: Sequence[Hit], preferred: Sequence[str]) -> list[str]:
+    present = []
+    for name in list(preferred) + sorted({h.database for h in hits}):
+        if name not in present and any(h.database == name for h in hits):
+            present.append(name)
+    return present
+
+
+def write_pivot(ws: Worksheet, result: SampleResult, databases: Sequence[str]) -> int:
+    hits = [h for h in result.hits if category(h) != TYPING]
+    loci = group_loci(hits)
+    db_columns = _database_columns(hits, databases)
+
+    ws.cell(row=1, column=1, value=f"{result.sample}: every locus x every database").font = TITLE_FONT
+    m = result.mlst
+    st = f"{m.scheme} ST{m.sequence_type}" if m.scheme != "-" else "no MLST call"
+    scores = result.scores
+    ws.cell(row=2, column=1, value=(
+        f"Species: {result.species.name}   |   MLST: {st}   |   "
+        f"Resistance score: {scores.get('resistance_score', '-')}   |   "
+        f"Virulence score: {scores.get('virulence_score', '-')}"))
+    legend_row = 3
+    ws.cell(row=legend_row, column=1, value="Cell = % identity of that database's call at the "
+                                            "locus. Legend:").font = Font(italic=True)
+    col = 4
+    for _floor, colour, band in IDENTITY_BANDS:
+        cell = ws.cell(row=legend_row, column=col, value=band)
+        cell.fill = _fill(colour)
+        cell.alignment = Alignment(horizontal="center")
+        col += 1
+    cell = ws.cell(row=legend_row, column=col, value="mutation")
+    cell.fill = _fill(MUTATION_COLOUR)
+    ws.cell(row=legend_row, column=col + 1, value="italic = partial coverage").font = PARTIAL_FONT
+
+    header_row = 5
+    titles = (["Category", "Drug class", "Gene"] + db_columns +
+              ["Best identity (%)", "Coverage (%)", "Databases", "Location"])
+    _write_header(ws, header_row, titles)
+    for c in range(4, 4 + len(db_columns)):
+        ws.cell(row=header_row, column=c).alignment = Alignment(
+            horizontal="center", vertical="bottom", text_rotation=90)
+    ws.row_dimensions[header_row].height = 80
+
+    row = header_row
+    for locus in loci:
+        row += 1
+        p = locus.primary
+        cat = locus.category
+        cat_fill = _fill(CATEGORY_COLOURS[cat])
+        for c, value in enumerate((cat, p.drug_class or "-", label(p)), start=1):
+            cell = ws.cell(row=row, column=c, value=_clean(value))
+            cell.fill = cat_fill
+            cell.border = CELL_BORDER
+        best_by_db: dict[str, Hit] = {}
+        for call in locus.calls:
+            current = best_by_db.get(call.database)
+            if current is None or call.identity_pct > current.identity_pct:
+                best_by_db[call.database] = call
+        for offset, name in enumerate(db_columns):
+            cell = ws.cell(row=row, column=4 + offset)
+            cell.border = CELL_BORDER
+            call = best_by_db.get(name)
+            if call is None:
+                continue
+            cell.value = round(call.identity_pct, 1)
+            cell.number_format = "0.0"
+            cell.alignment = Alignment(horizontal="center")
+            cell.fill = _fill(MUTATION_COLOUR if cat == MUTATION
+                              else identity_colour(call.identity_pct))
+            if call.resolution == "PARTIAL":
+                cell.font = PARTIAL_FONT
+            if cat != MUTATION and call.gene != p.gene:
+                cell.comment = Comment(f"{name}: {call.gene}", "Hydra-win")
+        tail_col = 4 + len(db_columns)
+        best = max(locus.calls, key=lambda h: h.identity_pct)
+        strand = p.strand or "+"
+        values = (round(best.identity_pct, 2), round(p.coverage_pct, 2), len(best_by_db),
+                  f"{p.sequence}:{min(p.start, p.end)}-{max(p.start, p.end)} ({strand})")
+        for offset, value in enumerate(values):
+            cell = ws.cell(row=row, column=tail_col + offset, value=_clean(value))
+            cell.border = CELL_BORDER
+        best_cell = ws.cell(row=row, column=tail_col)
+        best_cell.fill = _fill(MUTATION_COLOUR if cat == MUTATION
+                               else identity_colour(best.identity_pct))
+
+    ws.freeze_panes = ws.cell(row=header_row + 1, column=4)
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(len(titles))}{max(row, header_row)}"
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["B"].width = 28
+    ws.column_dimensions["C"].width = 26
+    for c in range(4, 4 + len(db_columns)):
+        ws.column_dimensions[get_column_letter(c)].width = 7
+    tail_col = 4 + len(db_columns)
+    for offset, width in enumerate((10, 10, 10, 40)):
+        ws.column_dimensions[get_column_letter(tail_col + offset)].width = width
+    return len(loci)
+
+
+# ------------------------------------------------------------ per-genome book
+def write_genome_workbook(result: SampleResult, path: Path, info: RunInfo | None = None,
+                          databases: Sequence[str] = ()) -> Path:
+    info = info or RunInfo()
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Summary"
+    write_genome_summary(ws, result, info)
+    ordered = sort_hits(result.hits)
+    for sheet, cats in SHEET_CATEGORIES.items():
+        chosen = [h for h in ordered if category(h) in cats]
+        if sheet == "Point_mutations":
+            write_hit_table(wb.create_sheet(sheet), [(h, (label(h),)) for h in chosen],
+                            leading=(("Mutation", None),))
+        else:
+            write_hit_table(wb.create_sheet(sheet), chosen, with_category=(sheet == "AMR_genes"))
+    write_typing(wb.create_sheet("Typing"), result)
+    write_hit_table(wb.create_sheet("All_hits"), ordered, with_category=True)
+    write_pivot(wb.create_sheet("Pivot"), result, databases)
+    wb.save(path)
+    return path
+
+
+# ------------------------------------------------------------ cumulative book
+MATRICES = (
+    ("AMR_matrix", (AMR, STRESS)),
+    ("Mutations_matrix", (MUTATION,)),
+    ("Virulence_matrix", (VIRULENCE,)),
+    ("Plasmids_matrix", (PLASMID,)),
+)
+
+
+def cumulative_summary_rows(results: Sequence[SampleResult]) -> tuple[list[str], list[list]]:
+    typing_schemes: list[str] = []
+    for result in results:
+        for typing in result.typing:
+            if typing.scheme not in typing_schemes:
+                typing_schemes.append(typing.scheme)
+    titles = (["Assembly", "Species", "Species confidence", "MLST scheme", "ST", "MLST profile"]
+              + [typing_label(s) for s in typing_schemes]
+              + list(SCORE_LABELS.values())
+              + [COUNT_LABELS[c] + " (n)" for c in COUNT_LABELS] + ["AMR drug classes (n)"]
+              + ["AMR genes", "Point mutations / disruptions", "Virulence genes",
+                 "Plasmid replicons", "Contigs", "Total length (bp)", "N50 (bp)", "GC (%)",
+                 "Warnings"])
+    rows = []
+    for result in results:
+        typing = {t.scheme: t for t in result.typing}
+        counts = category_counts(result)
+        row = [result.sample, result.species.name, result.species.confidence,
+               result.mlst.scheme, result.mlst.sequence_type, result.mlst.profile]
+        for scheme in typing_schemes:
+            t = typing.get(scheme)
+            row.append("" if t is None else (
+                t.call if t.lineage in ("-", "", None) else f"{t.call} ({t.lineage})"))
+        row += [_yes_no(result.scores.get(key, "")) for key in SCORE_LABELS]
+        row += [counts[c] for c in COUNT_LABELS] + [len(amr_classes(result))]
+        row += [", ".join(primary_genes(result, AMR) + primary_genes(result, STRESS)),
+                ", ".join(primary_genes(result, MUTATION)),
+                ", ".join(primary_genes(result, VIRULENCE)),
+                ", ".join(primary_genes(result, PLASMID))]
+        row += [result.qc.get("contigs"), result.qc.get("total_length"), result.qc.get("n50"),
+                result.qc.get("gc_percent"), "; ".join(result.warnings)]
+        rows.append([_clean(v) for v in row])
+    return titles, rows
+
+
+def matrix_data(results: Sequence[SampleResult], cats: Sequence[str]):
+    """(columns, cells): columns are (drug class, gene); cells[sample][gene] = best hit."""
+    cells: dict[str, dict[str, Hit]] = {}
+    classes: dict[str, str] = {}
+    for result in results:
+        per = cells.setdefault(result.sample, {})
+        for hit in result.hits:
+            if not hit.primary or category(hit) not in cats:
+                continue
+            name = label(hit)
+            classes.setdefault(name, hit.drug_class or "")
+            if not classes[name] and hit.drug_class:
+                classes[name] = hit.drug_class
+            current = per.get(name)
+            if current is None or hit.identity_pct > current.identity_pct:
+                per[name] = hit
+    columns = sorted(classes.items(), key=lambda kv: ((kv[1] or "~").upper(), kv[0].upper()))
+    return [(cls, gene) for gene, cls in columns], cells
+
+
+def write_matrix(ws: Worksheet, results: Sequence[SampleResult], cats: Sequence[str],
+                 title: str) -> int:
+    columns, cells = matrix_data(results, cats)
+    lead = ["Assembly", "Species", "ST", "Genes (n)"]
+    first = len(lead) + 1
+    # Row 1: drug class above each gene; row 2: the header proper.
+    for c, label in enumerate(lead, start=1):
+        ws.cell(row=1, column=c, value=title if c == 1 else None).font = Font(bold=True)
+    for offset, (cls, _gene) in enumerate(columns):
+        cell = ws.cell(row=1, column=first + offset, value=cls or "-")
+        cell.alignment = Alignment(text_rotation=90, horizontal="center", vertical="bottom")
+        cell.font = Font(bold=True, color="1F4E78")
+        cell.fill = SECTION_FILL
+    _write_header(ws, 2, lead + [gene for _cls, gene in columns])
+    for offset in range(len(columns)):
+        ws.cell(row=2, column=first + offset).alignment = Alignment(
+            text_rotation=90, horizontal="center", vertical="bottom")
+    ws.row_dimensions[1].height = 110
+    ws.row_dimensions[2].height = 110
+    mutation = MUTATION in cats
+    for r, result in enumerate(results, start=3):
+        per = cells.get(result.sample, {})
+        lead_values = [result.sample, result.species.name, result.mlst.sequence_type, len(per)]
+        for c, value in enumerate(lead_values, start=1):
+            cell = ws.cell(row=r, column=c, value=_clean(value))
+            cell.border = CELL_BORDER
+        for offset, (_cls, gene) in enumerate(columns):
+            cell = ws.cell(row=r, column=first + offset)
+            cell.border = CELL_BORDER
+            hit = per.get(gene)
+            if hit is None:
+                continue
+            cell.value = round(hit.identity_pct, 1)
+            cell.number_format = "0.0"
+            cell.alignment = Alignment(horizontal="center")
+            cell.fill = _fill(MUTATION_COLOUR if mutation else identity_colour(hit.identity_pct))
+            if hit.resolution == "PARTIAL":
+                cell.font = PARTIAL_FONT
+    last_col = max(len(lead), len(lead) + len(columns))
+    last_row = 2 + len(results)
+    ws.freeze_panes = ws.cell(row=3, column=first)
+    ws.auto_filter.ref = f"A2:{get_column_letter(last_col)}{last_row}"
+    ws.column_dimensions["A"].width = max(12, min(50, max((len(r.sample) for r in results),
+                                                          default=10) + 2))
+    ws.column_dimensions["B"].width = 26
+    ws.column_dimensions["C"].width = 8
+    ws.column_dimensions["D"].width = 9
+    for offset in range(len(columns)):
+        ws.column_dimensions[get_column_letter(first + offset)].width = 5.5
+    if not columns:
+        ws.cell(row=3 + len(results), column=1,
+                value="No calls in this category for any assembly.").font = Font(italic=True)
+    return len(columns)
+
+
+def write_cumulative_workbook(results: Sequence[SampleResult], path: Path,
+                              info: RunInfo | None = None) -> Path:
+    info = info or RunInfo()
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Summary"
+    titles, rows = cumulative_summary_rows(results)
+    _write_header(ws, 1, titles)
+    for r, values in enumerate(rows, start=2):
+        for c, value in enumerate(values, start=1):
+            cell = ws.cell(row=r, column=c, value=value)
+            cell.border = CELL_BORDER
+    ws.freeze_panes = "B2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(titles))}{len(rows) + 1}"
+    _autosize(ws, maximum=60)
+    note_row = len(rows) + 3
+    for label, value in (("Hydra-win", info.app_version), ("Upstream Hydra", info.upstream),
+                         ("Date", info.date), ("Databases", info.databases),
+                         ("Notes", info.notes)):
+        ws.cell(row=note_row, column=1, value=label).font = Font(bold=True)
+        ws.cell(row=note_row, column=2, value=_clean(value))
+        note_row += 1
+
+    for sheet, cats in MATRICES:
+        write_matrix(wb.create_sheet(sheet), results, cats, sheet.replace("_", " "))
+
+    long_rows = []
+    for result in results:
+        for hit in sort_hits(result.hits):
+            long_rows.append((hit, (result.sample,)))
+    write_hit_table(wb.create_sheet("All_hits"), long_rows,
+                    leading=(("Assembly", None),), with_category=True)
+    wb.save(path)
+    return path

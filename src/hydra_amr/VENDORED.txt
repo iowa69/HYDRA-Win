@@ -1,0 +1,31 @@
+Vendored copy of hydra_amr
+==========================
+
+Source:   https://github.com/iowa69/hydra
+Commit:   6d36c109491c16544e8919fe6962b4b62e97d3d7  (main, 2026-08-15, hydra_amr 1.4.0)
+Path:     src/hydra_amr  (copied verbatim, plus the upstream LICENSE file)
+Licence:  MIT (see LICENSE in this directory)
+
+Everything in this directory is upstream code. The only edits are marked
+"HYDRA-WIN PATCH" and are listed here, so a re-vendor is: copy the new
+upstream src/hydra_amr over this directory and re-apply these hunks.
+
+1. utils.py   - adds the module attribute RUN_HOOK (default None) and, inside
+                run(), lets that hook rewrite the command line and add
+                subprocess.run() keyword arguments. Hydra-win installs a hook
+                (hydra_win/winsafe.py) that, on every external command:
+                  * hides the console window (CREATE_NO_WINDOW) and detaches stdin;
+                  * runs the tool from a fixed working directory and hands BLAST+
+                    relative, ASCII-only, space-free paths for -db/-query/-out/-in,
+                    because BLAST+ on Windows mis-parses spaces in -db and cannot
+                    open non-ASCII paths.
+                With RUN_HOOK left at None behaviour is identical to upstream.
+
+2. db/fetch.py - _get_via_tool() (the curl/wget fallback used for VFDB) runs
+                with stdin detached and, on Windows, CREATE_NO_WINDOW, so no
+                console window flashes during a database download.
+
+Nothing else is changed. Upstream modules Hydra-win does not import
+(cli.py, report/, engines/reads.py's read-mapping code paths) are kept so the
+copy stays diffable against upstream; the read engine imports pysam lazily and
+is never called on the assembly path.

@@ -1,0 +1,11 @@
+[project]
+name = "hydra-win"
+version = "0.1.0"
+description = "Portable Windows GUI for the Hydra bacterial genome analyser"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = ["openpyxl>=3.1", "numpy>=1.24", "tkinterdnd2>=0.4"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
