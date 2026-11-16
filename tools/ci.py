@@ -75,20 +75,45 @@ def download(url: str, dest: Path, attempts: int = 4) -> Path:
 
 
 def run_exe(exe: Path, args: list[str], timeout: int, log_file: Path | None = None) -> int:
-    """Run the windowed exe, wait for it, echo its output and log."""
+    """Run the windowed exe, stream its log file while it runs, return its exit code."""
     log(f"running {exe.name} {' '.join(args)}")
     started = time.time()
-    proc = subprocess.run([str(exe), *args], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=timeout)
-    log(f"exit code {proc.returncode} after {time.time() - started:.0f}s")
-    for stream in (proc.stdout, proc.stderr):
-        if stream and stream.strip():
-            print(stream[-20000:], flush=True)
+    # The exe must not lean on the runner's Python settings (UTF-8 mode in particular).
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
+    out_path = Path(os.environ.get("RUNNER_TEMP", ".")) / f"exe-output-{os.getpid()}.txt"
+    with open(out_path, "w", encoding="utf-8") as out:
+        proc = subprocess.Popen([str(exe), *args], stdout=out, stderr=subprocess.STDOUT, env=env)
+        offset = 0
+        while True:
+            try:
+                rc = proc.wait(timeout=10)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            if log_file and log_file.exists():
+                with open(log_file, encoding="utf-8", errors="replace") as handle:
+                    handle.seek(offset)
+                    chunk = handle.read()
+                    offset = handle.tell()
+                for line in chunk.splitlines():
+                    if " DEBUG " not in line:
+                        print(f"  | {line}", flush=True)
+            if time.time() - started > timeout:
+                proc.kill()
+                log(f"killed after {timeout}s")
+                rc = -9
+                break
+    log(f"exit code {rc} after {time.time() - started:.0f}s")
+    text = out_path.read_text(encoding="utf-8", errors="replace")
+    if text.strip():
+        print(text[-20000:], flush=True)
     if log_file and log_file.exists():
-        print(f"----- {log_file.name} -----")
-        text = log_file.read_text(encoding="utf-8", errors="replace")
-        print(text[-30000:], flush=True)
-    return proc.returncode
+        with open(log_file, encoding="utf-8", errors="replace") as handle:
+            handle.seek(offset)
+            for line in handle.read().splitlines():
+                if " DEBUG " not in line:
+                    print(f"  | {line}", flush=True)
+    return rc
 
 
 # ---------------------------------------------------------------- steps
@@ -266,9 +291,15 @@ def cmd_smoke(zip_path: Path, work: Path) -> None:
     genomes = fetch_genomes(work / "genomes ö dir")
     out = work / "results ä folder"
     shutil.rmtree(out, ignore_errors=True)
+    # First launch, as a user gets it: download the non-redistributable databases.
+    fetch_log = work / "smoke-fetch.log"
+    started = time.time()
+    rc = run_exe(app, ["--fetch-db", "--log", str(fetch_log), "-v"], timeout=3600,
+                 log_file=fetch_log)
+    log(f"first-launch download took {time.time() - started:.0f}s (exit {rc})")
     log_file = work / "smoke-run.log"
     rc = run_exe(app, ["--cli", *map(str, genomes), "--out", str(out), "--cumulative",
-                       "--log", str(log_file)], timeout=5400, log_file=log_file)
+                       "--log", str(log_file)], timeout=2400, log_file=log_file)
     status_file = work / "smoke-db-status.json"
     run_exe(app, ["--db-status", str(status_file)], timeout=300)
     if status_file.exists():
@@ -293,8 +324,9 @@ def cmd_gui_smoke(app_dir: Path, work: Path) -> None:
     report = work / "gui-report.json"
     if report.exists():
         report.unlink()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
     proc = subprocess.Popen([str(exe), "--gui-smoke", "12", "--report", str(report),
-                             *map(str, genomes)])
+                             *map(str, genomes)], env=env)
     time.sleep(8)
     try:
         from PIL import ImageGrab  # noqa: PLC0415

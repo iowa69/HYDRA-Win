@@ -90,7 +90,10 @@ def main(argv: list[str] | None = None) -> int:
     attach_console()
     parser = build_parser()
     args = parser.parse_args(argv)
-    setup_logging(args.verbose, args.log)
+    try:
+        setup_logging(args.verbose, args.log)
+    except Exception:  # noqa: BLE001 - never let logging set-up hang a headless run
+        LOG.handlers[:] = [logging.NullHandler()]
 
     if args.version:
         print(f"Hydra-win {__version__} (upstream Hydra {UPSTREAM_COMMIT[:7]})")
@@ -148,3 +151,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except KeyboardInterrupt:
         return 130
+    except Exception:  # noqa: BLE001
+        # A windowed executable turns an uncaught exception into a modal dialog,
+        # which would leave a headless run waiting forever. Log it and exit.
+        LOG.exception("unexpected error")
+        return 1
