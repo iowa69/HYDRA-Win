@@ -75,7 +75,7 @@ class App:
         self.dnd_enabled = False
 
         root.title(f"Hydra-win {__version__}")
-        root.geometry("860x660")
+        root.geometry("860x620")
         root.minsize(680, 520)
         self._build()
         handler = _QueueHandler(self.events)
@@ -152,7 +152,7 @@ class App:
 
         logs = ttk.LabelFrame(self.root, text="Log")
         logs.pack(fill="both", expand=False, **pad)
-        self.log = ScrolledText(logs, height=8, state="disabled", wrap="word",
+        self.log = ScrolledText(logs, height=6, state="disabled", wrap="word",
                                 font=("Consolas", 9))
         self.log.pack(fill="both", expand=True, padx=8, pady=8)
 

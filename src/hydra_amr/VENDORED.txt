@@ -15,10 +15,13 @@ upstream src/hydra_amr over this directory and re-apply these hunks.
                 subprocess.run() keyword arguments. Hydra-win installs a hook
                 (hydra_win/winsafe.py) that, on every external command:
                   * hides the console window (CREATE_NO_WINDOW) and detaches stdin;
-                  * runs the tool from a fixed working directory and hands BLAST+
-                    relative, ASCII-only, space-free paths for -db/-query/-out/-in,
-                    because BLAST+ on Windows mis-parses spaces in -db and cannot
-                    open non-ASCII paths.
+                  * runs the tool from a fixed, space-free ASCII working directory
+                    and hands BLAST+ relative paths for -db/-query/-out/-in,
+                    because BLAST+ mis-parses spaces in -db, cannot open
+                    non-ASCII paths on Windows, and makeblastdb fails on a
+                    working directory containing a space;
+                  * makes makeblastdb build version-4 databases (no LMDB index:
+                    on Windows each LMDB file is allocated at its full map size).
                 With RUN_HOOK left at None behaviour is identical to upstream.
 
 2. db/fetch.py - _get_via_tool() (the curl/wget fallback used for VFDB) runs

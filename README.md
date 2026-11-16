@@ -108,8 +108,11 @@ Two pieces are added for Windows:
   test genomes. Upstream's species rules are then applied unchanged. Without it,
   upstream's MLST-only fallback names some *Klebsiella* genomes as *E. coli*.
 * **BLAST+ path handling.** BLAST+ on Windows can't cope with spaces or non-ASCII
-  characters in paths. Hydra-win passes it relative, ASCII-only paths, so the app works
-  from folders like `C:\Users\Jörg Müller\Downloads`.
+  characters in paths. Hydra-win runs it from an ASCII, space-free folder (the 8.3
+  short name, or `%LOCALAPPDATA%\Hydra-win`) and passes it relative paths, so the app
+  works from folders like `C:\Users\Jörg Müller\Downloads`. Its databases are built in
+  BLAST's version-4 format, which has no LMDB index; on Windows each LMDB file takes up
+  its full gigabyte-sized map.
 
 **Limitations**
 
