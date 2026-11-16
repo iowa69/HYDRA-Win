@@ -45,3 +45,12 @@ def test_expand_inputs(tmp_path):
         (tmp_path / "x" / name).write_text(">s\nACGT\n")
     found = sorted(p.name for p in core.expand_inputs([tmp_path / "x"]))
     assert found == ["a.fasta", "b.fa.gz", "c.fna", "d.fas"]
+
+
+def test_hook_builds_v4_databases(tmp_path):
+    winsafe.set_anchor(None)
+    cmd, kwargs = winsafe.hook(["makeblastdb", "-in", "x.fna", "-dbtype", "nucl"], False)
+    assert cmd[-2:] == ["-blastdb_version", "4"]
+    assert kwargs["stdin"] is not None
+    cmd, _ = winsafe.hook(["blastn", "-query", "q.fna"], True)
+    assert "-blastdb_version" not in cmd

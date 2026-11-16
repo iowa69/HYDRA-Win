@@ -153,6 +153,12 @@ def hook(cmd: list[str], has_input: bool) -> tuple[list[str], dict]:
         except Exception:  # noqa: BLE001 - progress must never break a run
             pass
     kwargs: dict = {}
+    if cmd and Path(cmd[0]).stem.lower() == "makeblastdb" and "-blastdb_version" not in cmd:
+        # Version 4 databases carry no LMDB index. On Windows an LMDB file is
+        # allocated at the full map size (1 GB or more, per index file), which
+        # turns a 150 MB database into tens of GB on disk; Hydra never looks
+        # sequences up by accession, which is all the LMDB index adds.
+        cmd = [*cmd, "-blastdb_version", "4"]
     if _anchor is not None:
         cmd = rewrite(cmd)
         kwargs["cwd"] = str(_anchor_cwd or _anchor)
