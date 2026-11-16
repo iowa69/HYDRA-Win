@@ -66,6 +66,7 @@ jobs:
           path: |
             ${{ runner.temp }}/smoke/smoke-results
             ${{ runner.temp }}/smoke/*.log
+            ${{ runner.temp }}/smoke/*.txt
             ${{ runner.temp }}/smoke/*.json
             ${{ runner.temp }}/smoke/gui-screenshot.png
             dist/build-db.log

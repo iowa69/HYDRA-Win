@@ -101,14 +101,17 @@ def _resolve_home() -> tuple[Path, Path]:
     The first writable candidate with a BLAST-safe spelling wins. When none has
     one, the first writable candidate is used as it is.
     """
-    writable = [c for c in _home_candidates() if _writable(c / "work")]
-    if not writable:
-        raise OSError("no writable folder for Hydra-win's databases and scratch files")
-    for candidate in writable:
+    first_writable = None
+    for candidate in _home_candidates():
+        if not _writable(candidate / "work"):
+            continue
+        first_writable = first_writable or candidate
         alias = winsafe.blast_alias(candidate)
         if alias is not None:
             return candidate, alias
-    return writable[0], writable[0]
+    if first_writable is None:
+        raise OSError("no writable folder for Hydra-win's databases and scratch files")
+    return first_writable, first_writable
 
 
 def _find_blast() -> Path | None:

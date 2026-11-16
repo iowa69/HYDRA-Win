@@ -57,6 +57,20 @@ def setup_logging(verbose: bool, extra_log: Path | None) -> None:
         LOG.addHandler(file_handler)
 
 
+def _arm_hang_dump(log_path: Path | None) -> None:
+    """With HYDRA_WIN_HANG_DUMP=SECONDS, write every thread's stack periodically.
+
+    A diagnostic for headless runs that stall: the stacks land next to the log.
+    """
+    seconds = os.environ.get("HYDRA_WIN_HANG_DUMP")
+    if not seconds or log_path is None:
+        return
+    import faulthandler  # noqa: PLC0415
+
+    handle = open(Path(f"{log_path}.stacks.txt"), "w", encoding="utf-8")  # noqa: SIM115
+    faulthandler.dump_traceback_later(float(seconds), repeat=True, file=handle)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="Hydra-win.exe --cli",
@@ -94,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
         setup_logging(args.verbose, args.log)
     except Exception:  # noqa: BLE001 - never let logging set-up hang a headless run
         LOG.handlers[:] = [logging.NullHandler()]
+    _arm_hang_dump(args.log)
 
     if args.version:
         print(f"Hydra-win {__version__} (upstream Hydra {UPSTREAM_COMMIT[:7]})")

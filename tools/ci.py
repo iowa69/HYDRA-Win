@@ -80,6 +80,7 @@ def run_exe(exe: Path, args: list[str], timeout: int, log_file: Path | None = No
     started = time.time()
     # The exe must not lean on the runner's Python settings (UTF-8 mode in particular).
     env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
+    env["HYDRA_WIN_HANG_DUMP"] = "300"
     out_path = Path(os.environ.get("RUNNER_TEMP", ".")) / f"exe-output-{os.getpid()}.txt"
     with open(out_path, "w", encoding="utf-8") as out:
         proc = subprocess.Popen([str(exe), *args], stdout=out, stderr=subprocess.STDOUT, env=env)
@@ -90,6 +91,10 @@ def run_exe(exe: Path, args: list[str], timeout: int, log_file: Path | None = No
                 break
             except subprocess.TimeoutExpired:
                 pass
+            stacks = Path(f"{log_file}.stacks.txt") if log_file else None
+            if stacks and stacks.exists() and stacks.stat().st_size and int(time.time()) % 300 < 10:
+                print(f"----- thread stacks ({stacks.name}) -----")
+                print(stacks.read_text(encoding="utf-8", errors="replace")[-6000:], flush=True)
             if log_file and log_file.exists():
                 with open(log_file, encoding="utf-8", errors="replace") as handle:
                     handle.seek(offset)
@@ -176,10 +181,18 @@ def cmd_package(dist: Path, zip_path: Path) -> None:
     zip_path.parent.mkdir(parents=True, exist_ok=True)
     if zip_path.exists():
         zip_path.unlink()
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
-        for path in sorted(dist.rglob("*")):
-            if path.is_file():
-                zf.write(path, Path(dist.name) / path.relative_to(dist))
+    seven = shutil.which("7z") or next(
+        (str(p) for p in (Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "7-Zip" / "7z.exe",)
+         if p.exists()), None)
+    if seven:
+        # Multi-threaded deflate; the archive is an ordinary .zip with a top-level folder.
+        subprocess.run([seven, "a", "-tzip", "-mx=5", "-mmt=on", str(zip_path.resolve()),
+                        dist.name], cwd=dist.parent, check=True, stdout=subprocess.DEVNULL)
+    else:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+            for path in sorted(dist.rglob("*")):
+                if path.is_file():
+                    zf.write(path, Path(dist.name) / path.relative_to(dist))
     log(f"wrote {zip_path} ({zip_path.stat().st_size / 1e6:.1f} MB)")
 
 
