@@ -1098,6 +1098,88 @@ def describe_divergent(hit: Hit) -> MutationDetail:
     return detail
 
 
+# ------------------------------------------------------------------- reads
+def _read_support(alt: str, alt_count: int, depth: int, fraction: float) -> str:
+    return f"{alt} in {alt_count}/{depth} reads (allele fraction {fraction:.3f})"
+
+
+def describe_read_site(call, organism: str | None = None) -> MutationDetail:
+    """A catalogued DNA site measured from reads mapped to the catalogue's reference locus.
+
+    There is no contig: the position is on the reference the reads were mapped
+    to, and the reference base is that reference's own. What the reads carry is
+    a count per base, so it is reported as such rather than as a codon.
+    """
+    locus = call.reference.split("@")[1].replace("_", " ") if "@" in call.reference \
+        else call.gene
+    rrna = any(tag in (call.gene + call.reference) for tag in ("16S", "23S", "rRNA"))
+    promoter = call.position < 0 or "promoter" in call.reference.lower()
+    kind = "rRNA" if rrna else ("promoter" if promoter else "nucleotide")
+    detail = MutationDetail(symbol=call.symbol, call_type=kind, type_label=TYPE_LABELS[kind],
+                            resistance=resistance_text(call.drug_class, call.subclass))
+    prefix = "n." if rrna else "c."
+    if len(call.alt_base) == 1 and len(call.ref_base) == 1:
+        detail.nucleotide_change = f"{prefix}{call.position}{call.ref_base}>{call.alt_base}"
+        detail.base_change = f"{call.ref_base}>{call.alt_base}"
+    detail.reference = call.ref_base
+    detail.nucleotide_basis = f"reference base from the catalogue's reference sequence ({locus})"
+    detail.observed = _read_support(call.alt_base, call.alt_count, call.depth,
+                                    call.allele_fraction)
+    detail.location = (f"{call.reference.split('@')[0]}:{call.position} on the reference "
+                       f"{locus} (reads mapped to the reference; no contig)")
+    status = {"fixed": "fixed (all copies)", "heteroresistant": "heteroresistant (a minority of "
+              "copies or cells)", "absent": "absent", "low-depth": "not assessable (low depth)"}
+    detail.description = (f"{locus}: {call.alt_count} of {call.depth} reads carry {call.alt_base} "
+                          f"at position {call.position} where the reference has {call.ref_base} "
+                          f"({detail.nucleotide_change or call.symbol}), "
+                          f"{status.get(call.status, call.status)}: "
+                          f"{detail.resistance or 'catalogued resistance mutation'}.")
+    return detail
+
+
+def describe_read_variant(variant, entry, gene: str, reference_name: str,
+                          drug_class: str = "", subclass: str = "") -> MutationDetail:
+    """A difference between the reads and the closest reference gene they were mapped to.
+
+    The reference here is a real nucleotide sequence (the database allele), so
+    the base change is observed, not inferred. The isolate codon is not given:
+    reads support each base separately, and a minority allele has no consensus
+    codon of its own.
+    """
+    detail = MutationDetail(resistance=resistance_text(drug_class, subclass))
+    protein = variant.protein_change
+    if protein:
+        ref_aa, alt_aa = variant.ref_aa, variant.alt_aa
+        detail.call_type = "nonsense" if alt_aa == "*" else "substitution"
+        detail.protein_change = (f"{ref_aa}{variant.codon_position}"
+                                 f"{'Ter' if alt_aa == '*' else alt_aa}")
+        detail.protein_hgvs = (f"p.{AA3.get(ref_aa, ref_aa)}{variant.codon_position}"
+                               f"{AA3.get(alt_aa, alt_aa)}")
+    else:
+        detail.call_type = "nucleotide"
+    detail.type_label = TYPE_LABELS[detail.call_type]
+    detail.symbol = entry.symbol if entry is not None else \
+        f"{gene}_{detail.protein_change or variant.nucleotide_change}"
+    detail.nucleotide_change = f"c.{variant.position}{variant.ref_base}>{variant.alt_base}"
+    detail.reference = variant.ref_base
+    detail.base_change = f"{variant.ref_base}>{variant.alt_base}" + (
+        f" at codon position {(variant.position - 1) % 3 + 1}" if protein else "")
+    detail.nucleotide_basis = f"reference base from the reference gene {reference_name}"
+    detail.observed = _read_support(variant.alt_base, variant.alt_count, variant.depth,
+                                    variant.allele_fraction)
+    detail.location = (f"{reference_name}:{variant.position} on the closest reference gene "
+                       "(reads mapped to the reference; no contig)")
+    detail.description = (f"{gene}: {variant.alt_count} of {variant.depth} reads carry "
+                          f"{variant.alt_base} at position {variant.position} of {reference_name} "
+                          f"where it has {variant.ref_base}"
+                          + (f" ({detail.protein_hgvs})" if protein else "")
+                          + (f": catalogued as {entry.symbol}, {detail.resistance}."
+                             if entry is not None else ": not in the mutation catalogue."))
+    if entry is None:
+        detail.unresolved = "not a catalogued resistance mutation"
+    return detail
+
+
 # --------------------------------------------------------------------- driver
 def describe(hit: Hit, contigs: Mapping[str, str], organism: str | None) -> MutationDetail | None:
     evidence = hit.evidence or {}

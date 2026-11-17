@@ -128,3 +128,66 @@ def test_missing_databases_are_stated_not_mistaken_for_negatives(tmp_path):
     labels = [c.value for c in ws["A"] if c.value]
     assert any(str(v).startswith("NOT PERFORMED (pubmlst") for v in labels)
     assert excel.headline(result, missing)["mlst"] == "not typed (no PubMLST)"
+
+
+def test_downloads_fall_back_to_windows_and_remember_what_works(tmp_path, monkeypatch):
+    calls = []
+
+    def direct(url, dest, progress=None):
+        calls.append("direct")
+        try:
+            raise urllib.error.URLError(socket.timeout("timed out"))
+        except urllib.error.URLError as exc:
+            raise HydraError(f"could not download {url}: {exc}") from exc
+
+    def windows(url, dest):
+        calls.append("windows")
+        dest.write_text("data")
+        return dest
+
+    monkeypatch.setattr(netfetch, "WINDOWS", True)
+    monkeypatch.setattr(netfetch, "_system_proxy", lambda url: None)
+    monkeypatch.setattr(netfetch, "_via_windows", windows)
+    monkeypatch.setattr(netfetch, "_route", {})
+    monkeypatch.setattr(netfetch, "_dead", {})
+    for i in range(3):
+        netfetch.fetch_once(f"https://rest.example.org/f{i}", tmp_path / f"f{i}", _first=direct)
+    # The direct route timed out once; the next files went straight to the one that worked.
+    assert calls == ["direct", "windows", "windows", "windows"]
+
+
+def test_an_unreachable_host_fails_fast_with_its_reason(tmp_path, monkeypatch):
+    def direct(url, dest, progress=None):
+        try:
+            raise urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed"))
+        except urllib.error.URLError as exc:
+            raise HydraError(f"could not download {url}: {exc}") from exc
+
+    def windows(url, dest):
+        raise HydraError("Windows downloader failed: The remote name could not be resolved")
+
+    monkeypatch.setattr(netfetch, "WINDOWS", True)
+    monkeypatch.setattr(netfetch, "_system_proxy", lambda url: None)
+    monkeypatch.setattr(netfetch, "_via_windows", windows)
+    monkeypatch.setattr(netfetch, "_route", {})
+    monkeypatch.setattr(netfetch, "_dead", {})
+    for i in range(netfetch.DEAD_AFTER):
+        with pytest.raises(HydraError, match="could not be resolved"):
+            netfetch.fetch_once(f"https://pubmlst.example/f{i}", tmp_path / "x", _first=direct)
+    with pytest.raises(HydraError, match="gave up on pubmlst.example"):
+        netfetch.fetch_once("https://pubmlst.example/last", tmp_path / "x", _first=direct)
+
+
+def test_an_http_answer_is_not_retried_through_other_routes(tmp_path, monkeypatch):
+    def direct(url, dest, progress=None):
+        try:
+            raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
+        except urllib.error.HTTPError as exc:
+            raise HydraError(f"could not download {url}: {exc}") from exc
+
+    monkeypatch.setattr(netfetch, "WINDOWS", True)
+    monkeypatch.setattr(netfetch, "_via_windows", lambda url, dest: pytest.fail("not tried"))
+    monkeypatch.setattr(netfetch, "_route", {})
+    monkeypatch.setattr(netfetch, "_dead", {})
+    with pytest.raises(HydraError, match="HTTP 404"):
+        netfetch.fetch_once("https://x.example/f", tmp_path / "f", _first=direct)

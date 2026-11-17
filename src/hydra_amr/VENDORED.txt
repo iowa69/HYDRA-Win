@@ -47,6 +47,10 @@ upstream src/hydra_amr over this directory and re-apply these hunks.
                          caller keeps the reference sequences it already reads.
      pipeline.py         one call to lesions.describe_mutations() per assembly
                          after screening.
+     engines/reads.py    read-derived site and variant calls get the same detail
+                         (not used by HYDRA-Win, kept identical to upstream).
+     report/             hydra.mutations table, detail in the HTML report (not
+                         used by HYDRA-Win, kept identical to upstream).
    Which mutations are called is unchanged: tools/compare_upstream.py matches
    upstream at the commit above on every existing field.
 

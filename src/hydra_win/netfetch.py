@@ -43,6 +43,17 @@ TIMEOUT = upstream_fetch.TIMEOUT
 _installed = False
 _truststore = False
 _proxy_cache: dict[str, str | None] = {}
+#: host -> the route that last worked ("direct", "proxy", "windows"). A PubMLST
+#: install is over a thousand files from one host; once the direct route has
+#: timed out and another worked, the rest go straight to the one that works.
+_route: dict[str, str] = {}
+#: host -> consecutive downloads for which every route failed. After a few, the
+#: host is treated as unreachable and later files fail at once with the reason.
+_dead: dict[str, int] = {}
+_dead_reason: dict[str, str] = {}
+DEAD_AFTER = 3
+#: The Windows-only routes are tried only on Windows (a flag so tests can set it).
+WINDOWS = os.name == "nt"
 
 
 def install() -> None:
@@ -107,7 +118,7 @@ def _short(exc) -> str:
 
 def _system_proxy(url: str) -> str | None:
     """The proxy Windows would use for *url* (PAC and WPAD included), or None."""
-    if os.name != "nt":
+    if not WINDOWS:
         return None
     host = urlsplit(url).netloc
     if host in _proxy_cache:
@@ -166,28 +177,47 @@ def _via_windows(url: str, dest: Path) -> Path:
 def fetch_once(url: str, dest: Path, progress=None, *, _first=None) -> Path:
     """One download attempt: urllib, then the Windows proxy, then Windows itself."""
     first = _first or upstream_fetch._get_once
-    try:
-        return first(url, dest, progress)
-    except HydraError as exc:
-        reason = describe_failure(exc)
-        cause = exc.__cause__
-        if isinstance(cause, urllib.error.HTTPError) and cause.code != 407:
-            # The server answered: a different route would get the same answer.
-            raise HydraError(f"could not download {url}: {reason} ({cause})") from exc
-        if os.name != "nt":
-            raise HydraError(f"could not download {url}: {reason}") from exc
-        LOG.debug("direct download of %s failed (%s); trying the Windows network settings",
-                  url, reason)
+    host = urlsplit(url).netloc
+    if _dead.get(host, 0) >= DEAD_AFTER:
+        raise HydraError(f"could not download {url}: {_dead_reason.get(host, 'unreachable')} "
+                         f"(gave up on {host} after {DEAD_AFTER} failed downloads)")
+    reason = ""
+    if _route.get(host, "direct") == "direct":
+        try:
+            result = first(url, dest, progress)
+            _route[host], _dead[host] = "direct", 0
+            return result
+        except HydraError as exc:
+            reason = describe_failure(exc)
+            cause = exc.__cause__
+            if isinstance(cause, urllib.error.HTTPError) and cause.code != 407:
+                # The server answered: a different route would get the same answer.
+                raise HydraError(f"could not download {url}: {reason} ({cause})") from exc
+            if not WINDOWS:
+                raise HydraError(f"could not download {url}: {reason}") from exc
+            LOG.debug("direct download of %s failed (%s); trying the Windows network "
+                      "settings", url, reason)
     dest.parent.mkdir(parents=True, exist_ok=True)
     proxy = _system_proxy(url)
-    if proxy:
+    if proxy and _route.get(host) in (None, "direct", "proxy"):
         try:
-            return _via_proxy(url, dest, proxy)
+            result = _via_proxy(url, dest, proxy)
+            _route[host], _dead[host] = "proxy", 0
+            return result
         except (urllib.error.URLError, OSError, HydraError) as exc:
             LOG.debug("via proxy %s: %s", proxy, describe_failure(exc))
+            reason = reason or describe_failure(exc)
     try:
-        return _via_windows(url, dest)
+        result = _via_windows(url, dest)
+        if _route.get(host) != "windows":
+            LOG.info("downloading from %s through Windows' own downloader", host)
+        _route[host], _dead[host] = "windows", 0
+        return result
     except (OSError, subprocess.SubprocessError, HydraError) as exc:
+        _dead[host] = _dead.get(host, 0) + 1
+        reason = reason or _short(exc)
+        _dead_reason[host] = reason
+        _route.pop(host, None)
         raise HydraError(f"could not download {url}: {reason} (Windows' own downloader also "
                          f"failed: {_short(exc)})") from exc
 

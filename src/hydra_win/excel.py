@@ -175,14 +175,14 @@ MUTATION_COLUMNS: tuple[tuple[str, str, int], ...] = (   # title, MutationDetail
     ("Protein change", "protein_change", 15),
     ("Protein change (HGVS)", "protein_hgvs", 22),
     ("Nucleotide change", "nucleotide_change", 24),
-    ("Isolate codon / base (read from the assembly)", "observed", 24),
-    ("Reference codon / base (from a reference sequence)", "reference", 16),
-    ("Reference codon (INFERRED by parsimony, no reference CDS)", "reference_inferred", 16),
+    ("Isolate codon / base (read from the assembly)", "observed", 28),
+    ("Reference codon / base (from a reference sequence)", "reference", 18),
+    ("Reference codon (INFERRED by parsimony, no reference CDS)", "reference_inferred", 18),
     ("Base changed", "base_change", 24),
     ("Mutation position on contig", "location", 30),
     ("Gene position on contig", "gene_location", 30),
     ("Intact reference (disruptions)", "intact", 24),
-    ("Resistance it is associated with", "resistance", 30),
+    ("Resistance it is associated with", "resistance", 26),
     ("Kleborate-style call", "kleborate", 20),
     ("What it means", "description", 70),
     ("Basis of the base change", "nucleotide_basis", 50),
@@ -346,16 +346,19 @@ def write_hit_table(ws: Worksheet, hits: Sequence[Hit], *, leading: Sequence[tup
             if not hit.primary:
                 cell.font = REDUNDANT_FONT
         if mutations:
+            # Everything wraps and sits at the top: a row is as tall as its
+            # longest explanation, and every cell starts on the same line.
+            for col in range(1, len(values) + 1):
+                ws.cell(row=row, column=col).alignment = Alignment(vertical="top")
             first = len(lead_titles) + (1 if with_category else 0) + 1
             for offset, (_title, field_name, _width) in enumerate(MUTATION_COLUMNS):
                 cell = ws.cell(row=row, column=first + offset)
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
                 if field_name in ("symbol", "type_label"):
                     cell.fill = _fill(type_colour(hit))
                     cell.font = Font(bold=field_name == "symbol")
                 elif field_name == "reference_inferred" and cell.value:
                     cell.fill = _fill(INFERRED_FILL)
-                if field_name in ("description", "nucleotide_basis", "unresolved"):
-                    cell.alignment = Alignment(wrap_text=True, vertical="top")
         id_cell = ws.cell(row=row, column=identity_col)
         colour = MUTATION_COLOUR if category(hit) == MUTATION else identity_colour(hit.identity_pct)
         if colour:
@@ -372,7 +375,7 @@ def write_hit_table(ws: Worksheet, hits: Sequence[Hit], *, leading: Sequence[tup
         for offset in range(len(MUTATION_COLUMNS)):
             ws.cell(row=1, column=first + offset).alignment = Alignment(
                 horizontal="center", vertical="center", wrap_text=True)
-        ws.row_dimensions[1].height = 48
+        ws.row_dimensions[1].height = 64
         inferred = titles.index("Reference codon (INFERRED by parsimony, no reference CDS)") + 1
         ws.cell(row=1, column=inferred).comment = Comment(
             "AMRFinderPlus ships reference proteins, not coding sequences, for the "
@@ -489,6 +492,7 @@ def _kv(ws: Worksheet, row: int, key: str, value, *, colour: str | None = None) 
     key_cell = ws.cell(row=row, column=1, value=key)
     key_cell.font = Font(bold=True)
     key_cell.border = CELL_BORDER
+    key_cell.alignment = Alignment(vertical="top")
     value_cell = ws.cell(row=row, column=2, value=_clean(_yes_no(value)))
     value_cell.border = CELL_BORDER
     value_cell.alignment = Alignment(wrap_text=True, vertical="top")
@@ -972,11 +976,13 @@ def write_mutation_matrix(ws: Worksheet, results: Sequence[SampleResult], title:
     lead = ["Assembly", "Species", "ST", "Mutations (n)"]
     first = len(lead) + 1
     ws.cell(row=1, column=1, value=title).font = Font(bold=True)
-    ws.cell(row=1, column=2, value="Row 1: the resistance each gene's calls are associated "
+    ws.cell(row=2, column=1, value="Above each gene: the resistance its calls are associated "
                                    "with. Cell: the change the assembly carries (empty = none "
-                                   "detected). Blue: substitution / rRNA / promoter; orange: gene "
-                                   "disruption; grey: gene cut by a contig end (not evidence)."
-            ).font = Font(italic=True)
+                                   "detected). Blue: substitution, rRNA or promoter change; "
+                                   "orange: gene disruption; grey: gene cut by a contig end (not "
+                                   "evidence).").font = Font(italic=True, size=9)
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=4)
+    ws.cell(row=2, column=1).alignment = Alignment(wrap_text=True, vertical="top")
     for offset, (resistance, _gene) in enumerate(columns):
         cell = ws.cell(row=2, column=first + offset, value=resistance or "-")
         cell.alignment = Alignment(wrap_text=True, horizontal="center", vertical="bottom")
