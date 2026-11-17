@@ -444,8 +444,10 @@ def ensure_databases(progress: ProgressFn | None = None, offline: bool = False) 
         failures.update(databases.install(store, todo, progress=progress))
     if organism_todo:
         # The organism typing data the zip may not carry: the Ridom spa
-        # database, hicap's GPL-3.0 cap set, ShigEiFinder, and every PubMLST
-        # set. Each module fetches and verifies its own.
+        # database, hicap's GPL-3.0 cap set and ShigEiFinder's gene sets. The
+        # PubMLST data is in the zip now - its terms permit redistributing the
+        # pre-2025 snapshot an anonymous download returns. Each module fetches
+        # and verifies its own.
         LOG.info("first launch: downloading organism typing data for %s",
                  ", ".join(organism_todo))
         failures.update({f"typing-{k}": reason for k, reason in

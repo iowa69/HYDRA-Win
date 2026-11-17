@@ -27,11 +27,13 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tarfile
 import time
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -61,18 +63,27 @@ GENOMES = {
 EXPECT = {
     "HS11286": {"species": "Klebsiella pneumoniae", "st": "11",
                 "genes": ["blaKPC-2", "blaCTX-M-14"],
+                # pmrB_A21DfsTer16 is the 1 bp insertion Kleborate reports as
+                # pmrB:p.Gly20fs; Hydra missed it until pmrB was added to the
+                # loss-of-function catalogue, and the kleborate_call column
+                # carries Kleborate's own spelling of it.
                 "mutations": ["gyrA_S83I", "parC_S80I", "ompK35_G134AfsTer11",
-                              "cirA_N467MfsTer15"],
-                "matrix": {"gyrA": "S83I", "ompK35": "G134AfsTer11"},
+                              "cirA_N467MfsTer15", "pmrB_A21DfsTer16"],
+                "matrix": {"gyrA": "S83I", "ompK35": "G134AfsTer11",
+                           "pmrB": "A21DfsTer16"},
+                "kleborate": {"pmrB_A21DfsTer16": "pmrb:p.Gly20fs"},
                 # No organism typing module covers Klebsiella: its lineage
                 # schemes are the Kleborate ones, which the Typing sheet
                 # already carried before the modules existed.
                 "organism_typing": {}},
     "EC958": {"species": "Escherichia coli", "typing": {"ST achtman": "131"},
               "genes": ["blaCTX-M-15", "blaOXA-1"],
+              # acrR_F180LfsTer3 is AMRFinderPlus's own symbol for the frameshift
+              # in this genome's acrR; Hydra missed it until acrR was added to
+              # the loss-of-function catalogue for the Escherichia taxgroup.
               "mutations": ["gyrA_S83L", "gyrA_D87N", "parC_S80I", "parC_E84V", "parE_I529L",
-                            "ptsI_V25I", "uhpT_E350Q"],
-              "matrix": {"gyrA": "S83L; D87N"},
+                            "ptsI_V25I", "uhpT_E350Q", "acrR_F180LfsTer3"],
+              "matrix": {"gyrA": "S83L; D87N", "acrR": "F180LfsTer3"},
               # EC958 is the reference ST131-H30Rx uropathogen (Totsika 2011,
               # Forde 2014): phylogroup B2, fimH30, ExPEC by the marker rule,
               # and no Shiga toxin.
@@ -86,7 +97,13 @@ EXPECT = {
                   "Phylogroup (Clermont)": "B2",
                   "fimH allele (FimTyper)": "fimH30",
                   "Pathotype": "ExPEC",
-                  "Shiga toxin subtype": "none detected"},
+                  "Shiga toxin subtype": "none detected",
+                  # The bundled pre-2025 PubMLST snapshot types the Achtman
+                  # loci with no network, so the ST and the ST131 subclone call
+                  # that reads it are available offline.
+                  "ST achtman": "131"},
+              # What the Summary's own MLST row must read offline.
+              "offline_st": "131",
               "offline_undetermined": {
                   "Shigella / EIEC cluster": "the ShigEiFinder gene sets"},
               "headline": "ExPEC \u00b7 phylogroup B2"},
@@ -109,19 +126,22 @@ EXPECT = {
                    "Toxic shock toxin (tst)": "negative"},
                # What the bundled data alone can call, with no network.
                "offline_typing": {
+                   "MLST clonal complex": "CC8",
                    "agr group": "I",
                    "Panton-Valentine leucocidin (lukS/lukF-PV)": "positive",
                    "Capsule serotype (cap locus)": "5",
                    "Immune evasion cluster (IEC type)": "type B",
                    "Arginine catabolic mobile element": "arc cluster present",
                    "beta-haemolysin (hlb) status": "disrupted by prophage integration"},
-               # ... and what it cannot, with what is missing. The spa database
-               # is withheld by the Ridom policy; the clonal complex is derived
-               # from the sequence type, and PubMLST is a first-launch download
-               # too, so offline there is no ST to derive it from.
+               # ... and what it cannot, with what is missing. Only the spa
+               # database is still withheld, by the Ridom policy. The clonal
+               # complex is derived from the sequence type, and the pre-2025
+               # PubMLST snapshot is now in the zip, so offline there IS an ST
+               # to derive it from -- which is the point of the offline MLST
+               # test: a call that depends on the ST has to come out right.
                "offline_undetermined": {
-                   "spa type (Ridom)": "the Ridom spa database",
-                   "MLST clonal complex": "the PubMLST sequence type"},
+                   "spa type (Ridom)": "the Ridom spa database"},
+               "offline_st": "8",
                "headline": "spa t008 \u00b7 CC8 \u00b7 agr I"},
 }
 GENOME_SHEETS = ("Summary", "AMR_genes", "Point_mutations", "Virulence", "Plasmids",
@@ -248,6 +268,146 @@ def cmd_build_db(dist: Path) -> None:
                if d["route"] != "bundled" and d["installed"]]
     if shipped:
         raise SystemExit(f"non-redistributable databases present in the bundle: {shipped}")
+    problems = check_pubmlst_bundle(dist / "db")
+    for problem in problems:
+        log(f"PROBLEM: {problem}")
+    if problems:
+        raise SystemExit(f"{len(problems)} problem(s) with the bundled PubMLST snapshot")
+
+
+def check_pubmlst_bundle(db_root: Path) -> list[str]:
+    """The bundled PubMLST snapshot: present, pre-2025, credential-free, not doubled.
+
+    Shipping this snapshot rests on one sentence of PubMLST's terms, and that
+    sentence covers only data submitted on or before 2024-12-31. So the build
+    does not take it on trust:
+
+    * every scheme an organism module needs an ST from has to be there, or
+      bundling the snapshot bought nothing;
+    * the provenance file has to carry the terms, the retrieval date and the
+      result of the server-side check, so the zip explains itself;
+    * every allele id in the snapshot has to be in the index an anonymous
+      client sees, which is the content-level form of "nothing post-2024 is in
+      here" -- a leaked post-2024 allele would be absent from that index;
+    * nothing that looks like a credential may be in the tree, because an
+      authenticated fetch is the one way to pull data we may not redistribute;
+    * and the allele sets must be in the zip once, not once per module.
+    """
+    problems: list[str] = []
+    schemes_root = db_root / "mlst" / "pubmlst"
+    for scheme in PUBMLST_SCHEMES:
+        directory = schemes_root / scheme
+        if not directory.is_dir():
+            problems.append(f"pubmlst: scheme {scheme} is not in the bundle")
+            continue
+        loci = list(directory.glob("*.tfa"))
+        if not loci or not (directory / f"{scheme}.txt").exists():
+            problems.append(f"pubmlst/{scheme}: {len(loci)} loci and no profile table")
+
+    provenance = schemes_root / "PUBMLST.txt"
+    if not provenance.exists():
+        problems.append("pubmlst: PUBMLST.txt provenance file is missing from the bundle")
+    else:
+        text = provenance.read_text(encoding="utf-8", errors="replace")
+        for required in ("All data submitted on or before 31 December 2024",
+                        "Retrieved:", "ANONYMOUS", "Wellcome Trust",
+                        "Wellcome Open Res 2018;3:124"):
+            if required not in text:
+                problems.append(f"pubmlst: PUBMLST.txt does not state {required!r}")
+        if "Post-2024 data reachable? verified" not in text:
+            problems.append("pubmlst: PUBMLST.txt does not record a successful "
+                            "pre-2025 verification, so the snapshot cannot be "
+                            "claimed to be pre-2025")
+
+    problems += check_pubmlst_is_pre_2025(schemes_root)
+
+    credentials = [p for p in db_root.rglob("*") if p.is_file()
+                   and re.search(r"(api[_-]?key|credential|\.netrc|token)", p.name, re.I)]
+    if credentials:
+        problems.append(f"pubmlst: credential-looking files in the database tree: "
+                        f"{[p.name for p in credentials]}")
+
+    organism_root = db_root / "organisms"
+    for key, relative in SHARED_PUBMLST_COPIES.items():
+        second = organism_root / key / relative
+        if second.exists():
+            problems.append(f"{key}: {relative} is a second copy of allele sets the "
+                            f"bundled pubmlst database already holds "
+                            f"({second.stat().st_size / 1e6:.1f} MB)")
+    log(f"pubmlst bundle: {len(list(schemes_root.glob('*/')))} schemes, "
+        f"{sum(1 for _ in schemes_root.rglob('*.tfa'))} locus files, "
+        f"{sum(p.stat().st_size for p in schemes_root.rglob('*') if p.is_file()) / 1e6:.1f} MB")
+    return problems
+
+
+def check_pubmlst_is_pre_2025(schemes_root: Path, sample: int = 3) -> list[str]:
+    """Every allele in the snapshot is one an anonymous client can see.
+
+    PubMLST limits an unauthenticated client to data submitted on or before
+    2024-12-31 and says so on every response. The snapshot was fetched that
+    way, and this checks the result rather than the intention: the allele ids
+    in the bundled FASTA are compared against the index the API serves
+    anonymously now, and an ``added_after=2025-01-01`` query is asked to come
+    back empty. Both must hold for the snapshot to be redistributable.
+
+    Only a sample of loci is checked -- the full set is 1143 files and the
+    question is whether the fetch was anonymous, which is a property of the
+    whole run and not of one locus.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from hydra_amr.db.fetch import PUBMLST_CUTOFF, verify_pubmlst_is_pre_2025  # noqa: PLC0415
+
+    problems: list[str] = []
+    checked = 0
+    for scheme, database in (("neisseria", "pubmlst_neisseria_seqdef"),
+                             ("saureus", "pubmlst_saureus_seqdef"),
+                             ("hinfluenzae", "pubmlst_hinfluenzae_seqdef")):
+        directory = schemes_root / scheme
+        if not directory.is_dir():
+            continue
+        for locus_file in sorted(directory.glob("*.tfa"))[:sample]:
+            locus = locus_file.stem
+            ok, detail = verify_pubmlst_is_pre_2025(database, locus)
+            if not ok:
+                problems.append(f"pubmlst/{scheme}/{locus}: {detail}")
+                continue
+            reachable = pubmlst_allele_ids(database, locus)
+            if reachable is None:
+                problems.append(f"pubmlst/{scheme}/{locus}: the anonymous allele index "
+                                f"could not be read, so the snapshot could not be "
+                                f"checked against it")
+                continue
+            shipped = {line[1:].split()[0].rpartition("_")[2]
+                       for line in locus_file.read_text(errors="replace").splitlines()
+                       if line.startswith(">")}
+            extra = sorted(shipped - reachable, key=lambda a: (len(a), a))[:10]
+            if extra:
+                problems.append(
+                    f"pubmlst/{scheme}/{locus}: {len(shipped - reachable)} allele(s) in "
+                    f"the bundle are not in the index an anonymous client sees "
+                    f"(e.g. {extra}), so this snapshot is not the pre-{PUBMLST_CUTOFF[:4]} "
+                    f"one the terms let us redistribute")
+            checked += 1
+    if not checked and not problems:
+        problems.append("pubmlst: not one locus could be checked against the "
+                        "anonymous index")
+    log(f"pubmlst: {checked} locus file(s) checked against the anonymous pre-2025 "
+        f"index; added_after={PUBMLST_CUTOFF} returns no records")
+    return problems
+
+
+def pubmlst_allele_ids(database: str, locus: str) -> set[str] | None:
+    """Every allele id of one locus an anonymous client can reach, or None."""
+    url = (f"https://rest.pubmlst.org/db/{database}/loci/"
+           f"{urllib.parse.quote(locus, safe='')}/alleles?return_all=1")
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "HYDRA-Win CI"})
+        with urllib.request.urlopen(request, timeout=120) as response:
+            payload = json.load(response)
+    except Exception as exc:  # noqa: BLE001 - provenance check, not an install
+        log(f"could not read the anonymous allele index for {database}/{locus}: {exc}")
+        return None
+    return {str(href).rstrip("/").rpartition("/")[2] for href in payload.get("alleles", [])}
 
 
 def cmd_package(dist: Path, zip_path: Path) -> None:
@@ -493,35 +653,57 @@ def cmd_smoke(zip_path: Path, work: Path) -> None:
         raise SystemExit(f"{len(problems)} smoke-test problem(s)")
     log("smoke test passed")
     smoke_settings(app, genomes[0], work)
-    # The offline run gets the E. coli genome, not the S. aureus one. Offline
-    # there is no PubMLST, so the species can only come from the bundled Mash
-    # sketches, and those cover Enterobacterales: a S. aureus comes back as
-    # "unknown" and no organism module is selected for it, which is correct
-    # behaviour and not what this test is for. E. coli is identified from the
-    # sketches, so its typing runs with no network at all - and its one
-    # GPL-3.0 database is the half of the licence policy this proves.
+    # Two offline runs, because they prove different halves of the bundle.
+    #
+    # E. coli: identified from the bundled Mash sketches, and its one GPL-3.0
+    # database (ShigEiFinder) is the half of the licence policy that proves a
+    # withheld database still reads as "not determined" and not as a negative.
+    #
+    # S. aureus: the half the PubMLST snapshot is for. Its clonal complex is
+    # derived from the sequence type, so CC8 offline is only possible if the
+    # bundled MLST schemes really do type an isolate with no network - and its
+    # spa type still needs the Ridom download, so the same run proves the
+    # withheld database is still withheld.
     smoke_offline(zip_path, work, genomes[1])
+    smoke_offline(zip_path, work, genomes[2], suffix=" saureus", check_zip=False)
 
 
 #: What the zip itself must hold, and what only a first-launch download provides.
+#: pubmlst is bundled: its terms permit redistributing the pre-2025 data an
+#: anonymous download returns, which is all the snapshot contains.
 BUNDLED = {"protein", "ncbi", "resfinder", "plasmidfinder", "sccmec", "lineage", "species",
-           "vfdb", "argannot", "megares", "ecoli_vf", "ecoh"}
-DOWNLOADED = {"pubmlst", "card"}
+           "vfdb", "argannot", "megares", "ecoli_vf", "ecoh", "pubmlst"}
+DOWNLOADED = {"card"}
 
 #: Organism typing data the zip carries, and what the module can still do
 #: without the part it does not carry. One entry per upstream module, because a
 #: module silently dropped from the build would otherwise go unnoticed.
 ORGANISM_BUNDLED = {"typing-saureus", "typing-spyogenes", "typing-sagalactiae",
                     "typing-spneumoniae", "typing-hinfluenzae", "typing-salmonella",
-                    "typing-ecoli"}
-#: Not a single file of these may be in the zip: all PubMLST nomenclature data.
-ORGANISM_DOWNLOADED = {"typing-nmeningitidis"}
+                    "typing-ecoli", "typing-nmeningitidis"}
+#: Nothing is withheld from the zip wholesale any more: the meningococcal data
+#: is all PubMLST, and the pre-2025 snapshot may be redistributed.
+ORGANISM_DOWNLOADED: set[str] = set()
 #: Bundled, but deliberately incomplete: these databases are the ones a licence
 #: withholds, and the zip must not contain them.
 ORGANISM_PARTIAL = {
     "typing-saureus": {"spa"},            # Ridom: non-commercial, no copies
-    "typing-hinfluenzae": {"cap", "mlst"},  # hicap GPL-3.0; PubMLST
+    "typing-hinfluenzae": {"cap"},        # hicap: GPL-3.0 inside an MIT zip
     "typing-ecoli": {"shigeifinder"},     # ShigEiFinder GPL-3.0
+}
+
+#: The PubMLST schemes the zip must hold, because an organism module reads a
+#: sequence type from each of them. Shipping the snapshot is worth nothing if
+#: the schemes that make the typing work are not in it.
+PUBMLST_SCHEMES = ("saureus", "neisseria", "hinfluenzae", "senterica_achtman_2",
+                   "ecoli_achtman_4", "spneumoniae", "spyogenes", "sagalactiae")
+
+#: Allele sets a module used to ship a second copy of. The bundled pubmlst
+#: database holds them now, so exactly one copy may be in the zip.
+SHARED_PUBMLST_COPIES = {
+    "nmeningitidis": "mlst/mlst.fna",
+    "hinfluenzae": "mlst/mlst.fna",
+    "salmonella": "mlst/mlst.fna",
 }
 
 
@@ -557,24 +739,32 @@ def check_organism_bundle(status: dict) -> list[str]:
     return problems
 
 
-def smoke_offline(zip_path: Path, work: Path, genome: Path) -> None:
-    """A fresh unzip that cannot download: the bundled databases do all the work and the
-    two download-only ones are reported as missing, never as empty results."""
+def smoke_offline(zip_path: Path, work: Path, genome: Path, *, suffix: str = "",
+                  check_zip: bool = True) -> None:
+    """A fresh unzip that cannot download: the bundled databases do all the work and
+    the download-only one is reported as missing, never as an empty result.
+
+    Every run unzips the release into its own folder with its own database home,
+    so nothing the networked smoke run downloaded can be reached. The MLST
+    schemes are in the zip, so an isolate gets its sequence type here with no
+    network at all, and so does every call derived from it; a database the zip
+    does not carry must still read "not determined" with its reason.
+    """
     from openpyxl import load_workbook  # noqa: PLC0415
 
     from verify_mutations import verify  # noqa: PLC0415
 
-    parent = work / "offline app ü"
+    parent = work / f"offline app ü{suffix}"
     shutil.rmtree(parent, ignore_errors=True)
     with zipfile.ZipFile(zip_path) as zf:
         zf.extractall(parent)
     app = next(parent.glob(f"*/{APP}.exe"))
     problems = []
     # Its own home: the first smoke run's home (with the downloads) must not be shared.
-    home = work / "offline_home"
+    home = work / f"offline_home{suffix}"
     shutil.rmtree(home, ignore_errors=True)
     fresh = {"HYDRA_WIN_HOME": str(home)}
-    status_file = work / "offline-db-status.json"
+    status_file = work / f"offline-db-status{suffix}.json"
     run_exe(app, ["--db-status", str(status_file)], timeout=300, env_extra=fresh)
     status = json.loads(status_file.read_text(encoding="utf-8"))
     installed = {d["name"] for d in status["databases"] if d["installed"]}
@@ -582,9 +772,11 @@ def smoke_offline(zip_path: Path, work: Path, genome: Path) -> None:
     if installed != BUNDLED or missing != DOWNLOADED:
         problems.append(f"fresh unzip: installed {sorted(installed)}, missing {sorted(missing)}")
     problems += check_organism_bundle(status)
-    out = work / "results offline"
+    if check_zip:
+        problems += check_pubmlst_bundle(next(parent.glob(f"*/{APP}.exe")).parent / "db")
+    out = work / f"results offline{suffix}"
     shutil.rmtree(out, ignore_errors=True)
-    log_file = work / "smoke-offline.log"
+    log_file = work / f"smoke-offline{suffix}.log"
     rc = run_exe(app, ["--cli", str(genome), "--out", str(out), "--offline", "--log",
                        str(log_file)], timeout=1800, log_file=log_file, env_extra=fresh)
     if rc != 0:
@@ -595,12 +787,21 @@ def smoke_offline(zip_path: Path, work: Path, genome: Path) -> None:
     summary = {r[0]: r[1] for r in wb["Summary"].iter_rows(values_only=True) if r[0]}
     if "Analyses NOT performed (database not installed)" not in summary:
         problems.append("offline Summary does not list the analyses not performed")
-    if not str(summary.get("pubmlst", "")).startswith("NO MLST"):
-        problems.append(f"offline Summary pubmlst row {summary.get('pubmlst')!r}")
     if "CARD not screened" not in str(summary.get("card", "")):
         problems.append(f"offline Summary card row {summary.get('card')!r}")
-    if not str(summary.get("MLST ST", "")).startswith("not typed"):
-        problems.append(f"offline MLST ST {summary.get('MLST ST')!r} reads like a result")
+    # MLST is in the zip now, so the offline run must produce a real sequence
+    # type -- the whole point of bundling the pre-2025 PubMLST snapshot.
+    if "pubmlst" in summary:
+        problems.append(f"offline Summary still lists pubmlst as not performed: "
+                        f"{summary.get('pubmlst')!r}")
+    expected_st = EXPECT[name].get("offline_st")
+    reported_st = str(summary.get("MLST ST", ""))
+    if expected_st is None:
+        problems.append(f"{name} has no offline_st in EXPECT, so the offline MLST "
+                        f"result is not being checked at all")
+    elif reported_st != expected_st:
+        problems.append(f"offline {name}: MLST ST {reported_st!r} with no network, "
+                        f"expected {expected_st!r} from the bundled PubMLST schemes")
     if summary.get("Species") != EXPECT[name]["species"]:
         problems.append(f"offline species {summary.get('Species')!r}")
     hits = _rows(wb["All_hits"])
@@ -635,18 +836,26 @@ def smoke_offline(zip_path: Path, work: Path, genome: Path) -> None:
             problems.append(f"offline {name}: {scheme} is 'not determined' with no "
                             f"reason given, which reads as a negative result")
     text = log_file.read_text(encoding="utf-8", errors="replace")
-    if "not performed (pubmlst missing)" not in text:
-        problems.append("the offline log does not say MLST was not performed")
+    if "not performed (pubmlst missing)" in text:
+        problems.append("the offline log says MLST was not performed, but the "
+                        "PubMLST schemes are in the zip")
     if "organism typing available for" not in text:
         problems.append("the offline log does not say which organism typing is available")
-    log(f"offline: {len(installed)} bundled databases, missing {sorted(missing)}; "
-        f"hits from {sorted(used)}; {checked} mutation rows verified; "
+    # No network: a run that quietly reached one would invalidate every
+    # assertion above, so the log must not show a single download.
+    for leaked in ("downloading", "Downloading", "https://rest.pubmlst.org"):
+        if leaked in text:
+            problems.append(f"the offline log mentions {leaked!r}: this run was "
+                            f"supposed to have no network at all")
+            break
+    log(f"offline {name}: {len(installed)} bundled databases, missing {sorted(missing)}; "
+        f"ST {reported_st}; hits from {sorted(used)}; {checked} mutation rows verified; "
         f"{len([r for r in rows if r['Type'] == 'Organism typing'])} organism "
         f"typing calls")
     for problem in problems:
         log(f"PROBLEM: {problem}")
     if problems:
-        raise SystemExit(f"{len(problems)} offline problem(s)")
+        raise SystemExit(f"{len(problems)} offline problem(s) on {name}")
 
 
 def fake_reads(folder: Path, n: int = 6) -> Path:

@@ -15,9 +15,12 @@ from hydra_amr.utils import HydraError
 from hydra_win import databases, excel, netfetch
 
 
-def test_twelve_bundled_two_downloaded():
-    assert len(databases.BUNDLED) == 12
-    assert set(databases.FIRST_LAUNCH) == {"pubmlst", "card"}
+def test_thirteen_bundled_one_downloaded():
+    assert len(databases.BUNDLED) == 13
+    # Only CARD now: PubMLST's terms permit redistributing the pre-2025 data an
+    # anonymous download returns, so the snapshot ships in the zip.
+    assert set(databases.FIRST_LAUNCH) == {"card"}
+    assert "pubmlst" in databases.BUNDLED
     for name in ("vfdb", "argannot", "megares", "ecoli_vf", "ecoh"):
         route = next(r for r in databases.ROUTES if r.name == name)
         assert route.route == "bundled" and "no licence" in route.licence

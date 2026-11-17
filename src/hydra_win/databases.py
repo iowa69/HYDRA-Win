@@ -9,8 +9,20 @@ Two routes:
   repository has redistributed for years; DATABASES.txt says so and invites a
   rights holder to ask for removal;
 * **first launch** - downloaded from the upstream source on the user's machine,
-  because the source's terms withhold redistribution (CARD, PubMLST). These can
-  also be imported from a folder copied from another PC (:func:`import_folder`).
+  because the source's terms withhold redistribution (CARD). These can also be
+  imported from a folder copied from another PC (:func:`import_folder`).
+
+PubMLST moved from the second route to the first. Its terms say that "All data
+submitted on or before 31 December 2024 may continue to be downloaded, used, and
+redistributed without restriction, subject only to proper scientific citation
+and acknowledgement", and that "Anonymous (non-logged in) users may view only
+pre 2025 data" -- so an unauthenticated fetch returns exactly the data the terms
+let us ship. The snapshot is built with no API key and no other credential, and
+:func:`hydra_amr.db.fetch.verify_pubmlst_is_pre_2025` asks the server to confirm
+that nothing post-2024 was reachable. Adding a credential would pull post-2024
+data and with it the clause forbidding redistribution, so none must ever be
+added. Bundling it is what makes MLST, and every call derived from a sequence
+type, work with no network at all.
 
 Building uses upstream Hydra's own fetchers and importers
 (:meth:`hydra_amr.db.manager.DatabaseStore.download`), so the database is
@@ -88,8 +100,14 @@ ROUTES: tuple[Route, ...] = (
     Route("megares", "bundled", "MEGARes: no licence stated by the source", NO_LICENCE),
     Route("ecoli_vf", "bundled", "E. coli VF: no licence stated by the source", NO_LICENCE),
     Route("ecoh", "bundled", "EcOH: no licence stated by the source", NO_LICENCE),
-    Route("pubmlst", "first launch", "PubMLST terms of use",
-          "PubMLST's terms forbid redistributing or repackaging data downloaded since 2025"),
+    Route("pubmlst", "bundled", "PubMLST terms of use (pre-2025 data: redistribution "
+                                "permitted with citation and acknowledgement)",
+          "fetched anonymously with no API key, so only data submitted on or before "
+          "2024-12-31 is returned, and the terms place exactly that data outside every "
+          "restriction: \"All data submitted on or before 31 December 2024 may continue to "
+          "be downloaded, used, and redistributed without restriction, subject only to "
+          "proper scientific citation and acknowledgement.\" Cite Jolley, Bray & Maiden "
+          "2018, Wellcome Open Res 3:124, and acknowledge PubMLST (see DATABASES.txt)"),
     Route("card", "first launch", "CARD terms of use (academic/non-commercial)",
           "CARD's terms forbid redistribution without McMaster University's written consent"),
 )
@@ -412,7 +430,9 @@ def write_notice(db_root: Path, kleborate_source: str = "") -> None:
         "",
         "Which databases ship follows the project owner's policy: a source that states",
         "no licence or terms is shipped in the zip; a source that expressly restricts",
-        "redistribution (CARD, PubMLST) is downloaded on first launch. VFDB, ARG-ANNOT,",
+        "redistribution (CARD) is downloaded on first launch. PubMLST is shipped because",
+        "its terms expressly permit redistribution of the pre-2025 data an anonymous",
+        "download returns, and that is all this zip contains. VFDB, ARG-ANNOT,",
         "MEGARes, E. coli VF and EcOH state no licence at all, so they are shipped. That",
         "is the owner's decision, not a licence granted by those sources. If you hold",
         "rights in one of them and want it removed from the zip, open an issue at",
@@ -478,9 +498,10 @@ ORGANISM_ROUTES: tuple[OrganismRoute, ...] = (
         "saureus", bundled=("markers", "mlst"), download=("spa",),
         offline="agr group, SCCmec, PVL, tst, enterotoxins, haemolysins, hlb "
                 "and the prophage that interrupts it, capsule serotype locus, "
-                "immune evasion cluster, ACME and blaZ all work offline. The spa "
-                "type needs the Ridom download; the clonal complex is derived "
-                "from the sequence type, so it needs the PubMLST download too",
+                "immune evasion cluster, ACME and blaZ all work offline, and so "
+                "does the clonal complex, because the sequence type it is "
+                "derived from now comes from the bundled PubMLST snapshot. Only "
+                "the spa type needs the Ridom download",
         why="the Ridom spaServer policy expressly limits use of a copy of the "
             "database: \"Copies of the SpaServer database may not be used without "
             "permission to produce database driven web server or any other product "
@@ -503,29 +524,34 @@ ORGANISM_ROUTES: tuple[OrganismRoute, ...] = (
                 "where the triplet is in the CDC table, resistance determinants, "
                 "pilus islets"),
     OrganismRoute(
-        "hinfluenzae", bundled=("ftsI", "bla"), download=("cap", "mlst"),
-        offline="the PBP3 (ftsI) substitution pattern, its rPBP3 group and the "
-                "beta-lactam interpretation work offline; the capsule type and "
-                "the sequence type need the download",
+        "hinfluenzae", bundled=("ftsI", "bla", "mlst"), download=("cap",),
+        offline="the PBP3 (ftsI) substitution pattern, its rPBP3 group, the "
+                "beta-lactam interpretation and the sequence type all work "
+                "offline; only the capsule type needs the download",
         why="the cap reference set is package data of hicap, which is GPL-3.0: "
             "redistributable, but only under the GPL, so it is not mixed into "
-            "this MIT zip. The MLST alleles are PubMLST data"),
+            "this MIT zip. The MLST data is the pre-2025 PubMLST snapshot, which "
+            "may be redistributed, and its allele sets are not shipped twice: "
+            "the bundled pubmlst database holds them, and only this module's "
+            "profile table travels with the module"),
     OrganismRoute(
-        "nmeningitidis", bundled=(),
-        download=("capsule", "peptides", "mlst", "amr", "antigens"),
-        offline="nothing: every meningococcal call needs the first-launch "
-                "download. Until it has run, the typing reads 'not determined' "
-                "with that reason given",
-        why="every one of this module's databases is PubMLST nomenclature data, "
-            "whose terms restrict redistribution of anything submitted after "
-            "2024-12-31. The two porA/fetA reference proteins could be shipped, "
-            "but on their own they type nothing"),
+        "nmeningitidis",
+        bundled=("capsule", "peptides", "mlst", "amr", "antigens"), download=(),
+        offline="everything: serogroup from the capsule locus and the lesions "
+                "that disrupt it, PorA/FetA fine type, BAST and the MenDeVAR "
+                "vaccine-reactivity index, sequence type and clonal complex, "
+                "and the penicillin and ciprofloxacin resistance alleles",
+        why=""),
     OrganismRoute(
         "salmonella",
         bundled=("antigens", "serovars", "spi", "markers", "mlst"), download=(),
         offline="everything: serovar from the antigenic formula, subspecies, H2 "
                 "locus, pathogenicity islands, virulence plasmid, typhoidal "
-                "markers, ST and eBurst group"),
+                "markers, ST and eBurst group",
+        why="nothing is downloaded. The MLST allele sets are not shipped twice "
+            "either: the bundled pubmlst database holds the Achtman scheme and "
+            "only this module's profile table, which carries the eBurst group, "
+            "travels with the module"),
     OrganismRoute(
         "ecoli", bundled=("fimtyper", "stxtyper", "virulencefinder"),
         download=("shigeifinder",),
@@ -560,12 +586,42 @@ def organism_bundled_files(route: OrganismRoute, root: Path) -> list[Path]:
     licence kept out of the zip. Windows CI caught exactly that - the
     *H. influenzae* data shipped with its ``version.json``, and the
     first-launch download then skipped the *cap* and MLST sets for ever.
+
+    The MLST allele sets three modules download are a second copy of schemes
+    the bundled ``pubmlst`` database already holds, so they are left out here
+    and the zip carries one copy: see :func:`shared_pubmlst_copies`.
     """
     entry = organisms.get(route.key)
     out: list[Path] = []
+    shared = shared_pubmlst_copies(route.key, root)
     for name in route.bundled:
-        out.extend(entry.files_for(name, root))
+        out.extend(path for path in entry.files_for(name, root) if path not in shared)
     out.extend(entry.provenance_files(root, complete=not route.download))
+    return out
+
+
+def shared_pubmlst_copies(key: str, root: Path) -> set[Path]:
+    """Files of module *key* that the bundled ``pubmlst`` database already holds.
+
+    Four modules want a sequence type and all four ask Hydra for its own MLST
+    call first, typing the loci themselves only when there is none. With
+    ``pubmlst`` in the zip there always is one, so their own allele sets are
+    dead weight -- the largest part of three of these trees. Upstream declares
+    which files those are, per module, in
+    :data:`hydra_amr.typing.organisms.registry.DB_SHARED_WITH_PUBMLST`, and the
+    profile tables are deliberately not among them: they carry the clonal
+    complex and the eBurst group, which Hydra's scheme-agnostic MLST call does
+    not, so they stay with the module.
+
+    Returns an empty set unless ``pubmlst`` is one of the bundled databases,
+    because without the shared copy these files are the only copy there is.
+    """
+    if "pubmlst" not in BUNDLED:
+        return set()
+    module_root = organisms.get(key).root(root)
+    out: set[Path] = set()
+    for _scheme, pattern in organisms.shared_with_pubmlst(key):
+        out.update(path for path in module_root.glob(pattern) if path.is_file())
     return out
 
 
