@@ -2,7 +2,7 @@ Vendored copy of hydra_amr
 ==========================
 
 Source:   https://github.com/iowa69/hydra
-Commit:   7d4198e2b0a41d8fd1ebccc84884eeec9ba81e13  (branch typing-integration,
+Commit:   d6b13d3c337d2dfd8c4f0a77addf204fc4a00de7  (branch typing-integration,
           2026-11-17, hydra_amr 1.4.0). That branch is open as pull request #3
           and is cut from #2 (mutation-detail), so it contains both.
 Path:     src/hydra_amr  (copied verbatim, plus the upstream LICENSE file)

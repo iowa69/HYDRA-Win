@@ -146,6 +146,38 @@ def test_the_zip_only_carries_the_files_its_route_allows(tmp_path):
     assert entry.files_for("spa", root), "but it is still found once downloaded"
 
 
+def test_a_partly_bundled_module_ships_no_completion_stamp(tmp_path):
+    """Its fetch() returns at once on a stamp, so the rest would never arrive."""
+    root = tmp_path / "organisms"
+    base = root / "hinfluenzae"
+    for name in ("ftsI", "bla", "cap", "mlst"):
+        (base / name).mkdir(parents=True)
+        (base / name / f"{name}.fna").write_text(">x\nACGT\n")
+    (base / "version.json").write_text('{"version": "1"}')
+    route = databases.ORGANISM_BY_KEY["hinfluenzae"]
+    keep = {p.name for p in databases.organism_bundled_files(route, root)}
+    assert keep == {"ftsI.fna", "bla.fna"}
+    assert "version.json" not in keep
+    assert "cap.fna" not in keep and "mlst.fna" not in keep
+
+
+def test_a_fully_bundled_module_keeps_its_provenance_file(tmp_path):
+    root = tmp_path / "organisms"
+    base = root / "salmonella"
+    for name in ("antigens", "markers", "spi", "mlst"):
+        (base / name).mkdir(parents=True)
+    (base / "antigens" / "antigens.fna").write_text(">x\nACGT\n")
+    (base / "antigens" / "serovars.csv").write_text("x\n")
+    (base / "markers" / "markers.fna").write_text(">x\nACGT\n")
+    (base / "spi" / "spi.fna").write_text(">x\nACGT\n")
+    (base / "mlst" / "profiles.tsv").write_text("ST\n")
+    (base / "provenance.json").write_text("{}")
+    route = databases.ORGANISM_BY_KEY["salmonella"]
+    keep = {p.name for p in databases.organism_bundled_files(route, root)}
+    assert "provenance.json" in keep
+    assert "serovars.csv" in keep
+
+
 # ---------------------------------------------------------------- the sheets
 def _typed() -> SampleResult:
     result = SampleResult(sample="USA300")

@@ -552,12 +552,20 @@ def organism_db_names() -> tuple[str, ...]:
 
 
 def organism_bundled_files(route: OrganismRoute, root: Path) -> list[Path]:
-    """Every file of *route* that belongs inside the zip."""
+    """Every file of *route* that belongs inside the zip.
+
+    A module whose zip copy is deliberately incomplete does not get its
+    completion stamp: the module's own ``fetch()`` returns at once when it
+    finds one, so a stamped partial copy would never pick up the databases a
+    licence kept out of the zip. Windows CI caught exactly that - the
+    *H. influenzae* data shipped with its ``version.json``, and the
+    first-launch download then skipped the *cap* and MLST sets for ever.
+    """
     entry = organisms.get(route.key)
     out: list[Path] = []
     for name in route.bundled:
         out.extend(entry.files_for(name, root))
-    out.extend(entry.provenance_files(root))
+    out.extend(entry.provenance_files(root, complete=not route.download))
     return out
 
 
