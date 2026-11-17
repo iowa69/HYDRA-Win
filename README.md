@@ -505,7 +505,7 @@ Two of these are downloaded although their licence would permit redistribution:
 hicap's *cap* database and ShigEiFinder's gene sets are GPL-3.0, which is copyleft,
 and this zip is MIT. Downloading them on your own PC keeps the question from arising.
 
-The organism typing data adds about 34 MB to the zip. `db\DATABASES.txt` lists, for
+The organism typing data is about 33 MB before compression, and the release workflow prints the figure it actually built. `db\DATABASES.txt` lists, for
 every one of these, the exact source URL, the version or retrieval date, the licence in
 the source's own words, the redistribution status the source states, and the citation.
 If you hold rights in any of them and want it removed from the zip, please
