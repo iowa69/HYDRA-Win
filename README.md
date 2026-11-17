@@ -9,7 +9,7 @@
     <img src="https://img.shields.io/badge/%E2%AC%87%20Download%20HYDRA--Win%20for%20Windows-2ea44f?style=for-the-badge" alt="Download HYDRA-Win for Windows" height="56">
   </a>
   <br>
-  <sub>One zip, about 70 MB. Unzip, double-click <code>HYDRA-Win.exe</code>. No install.</sub>
+  <sub>One zip, about 78 MB. Unzip, double-click <code>HYDRA-Win.exe</code>. No install.</sub>
 </p>
 
 A portable Windows app for the bacterial genome analyser
@@ -53,15 +53,24 @@ count.
 <p align="center"><img src="docs/screenshots/window-5-running.png" alt="Analysis running" width="860"></p>
 
 **Finished.** Species, MLST, AMR genes and point mutations fill in as each genome
-finishes. Double-click a row to open its workbook.
+finishes, and the log lists each mutation with the resistance it is associated with.
+Double-click a row to open its workbook.
 
 <p align="center"><img src="docs/screenshots/window-6-finished.png" alt="Analysis finished with results in the table" width="860"></p>
+
+**Databases.** Click **Databases…** under the window: every database, whether it
+ships in the zip or is downloaded on this PC, and, for one that is missing, the real
+reason the download failed, with **Retry download** and **Import from folder…** (see
+[When a download fails](#when-a-download-fails)).
+
+<p align="center"><img src="docs/screenshots/window-7-databases.png" alt="The Databases dialog" width="860"></p>
 
 **Pivot sheet:** every locus against every database, shaded by % identity, with its location.
 
 <p align="center"><img src="docs/screenshots/06-genome-pivot.png" alt="Pivot sheet of one genome" width="900"></p>
 
-**Summary sheet:** species, MLST, scores, typing and counts for one genome.
+**Summary sheet:** species, MLST, scores, typing and counts for one genome, and each
+point mutation or gene disruption in one plain sentence.
 
 <p align="center"><img src="docs/screenshots/02-genome-summary.png" alt="Summary sheet of one genome" width="720"></p>
 
@@ -69,7 +78,8 @@ finishes. Double-click a row to open its workbook.
 
 <p align="center"><img src="docs/screenshots/03-genome-amr-genes.png" alt="AMR_genes sheet with contig coordinates" width="900"></p>
 
-**Point_mutations sheet**
+**Point_mutations sheet:** what mutated, read from the assembly, and what it means
+(see [Point mutations and gene disruptions](#point-mutations-and-gene-disruptions)).
 
 <p align="center"><img src="docs/screenshots/04-genome-point-mutations.png" alt="Point_mutations sheet" width="900"></p>
 
@@ -85,7 +95,8 @@ finishes. Double-click a row to open its workbook.
 
 <p align="center"><img src="docs/screenshots/08-cumulative-amr-matrix.png" alt="Cumulative AMR matrix" width="900"></p>
 
-**Cumulative_results, Mutations matrix**
+**Cumulative_results, Mutations matrix:** assemblies against genes; each cell states
+the change the assembly carries, with the resistance above each gene.
 
 <p align="center"><img src="docs/screenshots/09-cumulative-mutations-matrix.png" alt="Cumulative point-mutation matrix" width="720"></p>
 
@@ -97,9 +108,11 @@ finishes. Double-click a row to open its workbook.
    (not *Program Files*).
 3. Double-click `HYDRA-Win.exe`.
 
-The first time it starts, HYDRA-Win downloads the databases it isn't allowed to
-redistribute (see [Databases](#databases)). This needs an internet connection and takes
-a few minutes. It only happens once.
+Twelve of the fourteen databases are in the zip. The first time it starts, HYDRA-Win
+downloads the two it isn't allowed to redistribute, PubMLST (for MLST) and CARD (see
+[Databases](#databases)). This needs an internet connection and takes a few minutes. It
+only happens once. Everything else works without them, and every workbook says what
+was not done (see [When a download fails](#when-a-download-fails)).
 
 **Using it:**
 
@@ -169,19 +182,42 @@ This runs the same code path as the window. Other options:
 | `--threads N` | Number of threads to use (default: all cores) |
 | `--offline` | Don't download missing databases |
 | `--log FILE` | Also write the log to `FILE` |
-| `--db-status` | Report which databases are installed |
+| `--db-status` | Report which databases are installed, and why a missing one failed |
 | `--fetch-db` | Download the first-launch databases, then exit |
+| `--import-db FOLDER` | Install PubMLST and CARD from a folder copied from another PC, then exit |
 | `--version` | Print the version |
 
 FASTQ inputs are skipped with one warning. The exit code is non-zero if any genome
 failed. Every run also writes `hydra-win.log` into the results folder.
 
-### Upgrading from 0.1.0
+### When a download fails
 
-Unzip 0.2.0 into its own folder. Version 0.1.0 kept its databases inside its own folder
-when it could write there; 0.2.0 downloads those again on its first launch (a few
-minutes). When 0.1.0 couldn't write to its folder, it kept them in
-`%LOCALAPPDATA%\Hydra-win`, and 0.2.0 reuses them from there instead of downloading.
+Only PubMLST and CARD are downloaded. HYDRA-Win uses the Windows network settings, as
+your browser does: the system proxy (including automatic proxy configuration scripts),
+the Windows certificate store (so a hospital network that inspects HTTPS works), and,
+if Python's own connection is refused, Windows' own downloader with your logon
+credentials (for proxies that ask for them). Each download is retried, and the reason
+for a failure (an HTTP status, an untrusted certificate, a timeout, a proxy refusal, a
+name that does not resolve) is written to the log and shown under **Databases…**.
+
+If this PC still cannot reach the servers:
+
+1. On a PC where HYDRA-Win downloaded them (same or newer version), copy its `db`
+   folder (next to `HYDRA-Win.exe`, or `%LOCALAPPDATA%\Hydra-win\db`) to a USB stick.
+2. On this PC, open **Databases…** → **Import from folder…** and choose that folder
+   (or the whole HYDRA-Win folder), or run `HYDRA-Win.exe --import-db E:\db`.
+
+Without them, analyses still run with the other twelve databases. The window, the
+log and every `Summary` sheet state what was not done, for example *NO MLST: the
+PubMLST schemes are not installed, so no sequence type was determined; an empty ST is
+not a negative result*, and the MLST cell reads *not typed* rather than staying empty.
+
+### Upgrading
+
+Unzip the new version into its own folder. Databases an earlier version downloaded
+into `%LOCALAPPDATA%\Hydra-win` are reused; otherwise PubMLST and CARD are downloaded
+again on the first launch, or can be imported from the old folder with
+**Import from folder…**.
 
 ## Output
 
@@ -189,14 +225,14 @@ For each genome, `<results>\<genome>\<genome>.xlsx` contains these sheets:
 
 | Sheet | Contents |
 | --- | --- |
-| `Summary` | Species, MLST scheme/ST/profile, scores (resistance 0-3, ESBL, carbapenemase, colistin, virulence), counts per category, detected genes per category, lineage/serotype typing, assembly QC, the settings used, and database versions and thresholds |
+| `Summary` | Any analysis not performed because a database is missing (first, highlighted), species, MLST scheme/ST/profile, scores (resistance 0-3, ESBL, carbapenemase, colistin, virulence), counts per category, detected genes per category, each point mutation and disruption in one sentence with its resistance, lineage/serotype typing, assembly QC, the settings used, and database versions and thresholds |
 | `AMR_genes` | Every acquired AMR hit and every stress hit (biocide/metal/heat) |
-| `Point_mutations` | Resistance point mutations and gene disruptions, with the mutation (for example `gyrA_S83I`) |
+| `Point_mutations` | Resistance point mutations and gene disruptions: what changed, where and what it means first, then the raw hit columns (see below) |
 | `Virulence` | Virulence factor hits |
 | `Plasmids` | Plasmid replicon hits |
 | `Typing` | Species call, MLST, every lineage/serotype/element scheme, and serotype loci |
-| `All_hits` | Every hit in every category |
-| `Pivot` | One row per locus, grouped by category and drug class, with one column per database. Each cell holds that database's % identity and is colour-coded |
+| `All_hits` | Every hit in every category; mutation calls carry a one-line *Mutation: what changed* |
+| `Pivot` | One row per locus, grouped by category and drug class, with one column per database. Each cell holds that database's % identity and is colour-coded; for a mutation it holds the change itself (`S83I`, `G134AfsTer11`) |
 
 Every hit row has the contig, start, end and strand, plus gene, database, % identity,
 % coverage, drug class/subclass, product, accession, element type, method, resolution
@@ -207,16 +243,62 @@ The other calls stay in the sheets in grey, with `Primary call = no`. They aren'
 counted.
 
 Colours: green for 100% identity, then light green, yellow, orange and red as identity
-falls. Point mutations are blue. Italic means partial coverage.
+falls. Point mutations are blue, gene disruptions orange, and a gene cut by a contig
+end grey. Italic means partial coverage.
+
+### Point mutations and gene disruptions
+
+Every call in `Point_mutations` states, without decoding:
+
+| Column | Example (HS11286 *gyrA*) | Example (HS11286 *ompK35*) |
+| --- | --- | --- |
+| Mutation (AMRFinderPlus name) | `gyrA_S83I` | `ompK35_G134AfsTer11` |
+| Type of call | Amino-acid substitution | Gene disruption: frameshift |
+| Protein change / HGVS | `S83I` / `p.Ser83Ile` | `G134AfsTer11` / `p.Gly134AlafsTer12` |
+| Nucleotide change | `c.248G>T (inferred)` | `c.401delG (inferred)` |
+| Isolate codon / base (read from the assembly) | `ATC` | new frame from codon 134 stops at `TGA` (NC_016845.1:1904952-1904954) |
+| Reference codon (INFERRED by parsimony) | `AGC` | |
+| Base changed | G>T at codon position 2 | net 1-bp deletion |
+| Mutation position on contig | NC_016845.1:3738482-3738484 (-) | NC_016845.1:1904986-1904990 (-) |
+| Intact reference | | residues 1-133 of 359 (37%) |
+| Resistance it is associated with | quinolone resistance | carbapenem resistance; loss of function |
+| Kleborate-style call | `GyrA:p.Ser83Ile` | `OmpK35:p.Trp133fs` |
+
+followed by *What it means* (one sentence), *Basis of the base change* and *Not
+resolved*, then the raw hit columns.
+
+* **The isolate's codon is read from the assembly**: the alignment is walked to the
+  mutated residue, so the strand, indels before the position and contig ends are
+  handled, and the codon is re-translated as a check.
+* **Where the reference base comes from.** For the DNA loci of the AMRFinderPlus
+  catalogue (rRNA, promoters) it is read from the catalogue's reference sequence.
+  AMRFinderPlus ships proteins, not coding sequences, for the point-mutation genes, so
+  for a protein mutation (and the codon behind a premature stop or frameshift) the
+  reference codon is the codon for the reference amino acid closest to the isolate's
+  codon. That is an inference: it has its own column, the nucleotide change is marked
+  *(inferred)*, and when two codons are equally close nothing is claimed.
+* **Gene disruptions are named by their lesion**, the way AMRFinderPlus names them
+  (`ompK35_G134AfsTer11`, `mgrB_Q30Ter`): premature stop (codon and base change),
+  frameshift (the net indel, where the new frame stops, the HGVS `fsTer`, and the
+  deleted or inserted base when only one change restores the protein, marked
+  *inferred*), interruption by inserted sequence (its size; the element itself is not
+  identified), start codon lost, or 5' part absent. A gene that simply runs off the end
+  of a contig is labelled **Gene cut by a contig end (NOT evidence of disruption)**,
+  which AMRFinderPlus reports as `PARTIAL_CONTIG_END`. AMRFinderPlus counts the novel
+  residues before the stop (`fsTer11`); HGVS counts the stop as well (`fsTer12`).
+* **Kleborate's name** is given for the *K. pneumoniae* loci Kleborate types (GyrA,
+  ParC, OmpK35, OmpK36, MgrB, PmrB).
+* Anything that cannot be resolved to a codon (a position in an alignment gap, a codon
+  past a contig end, a mosaic allele) says so in *Not resolved*.
 
 With **Cumulative_results** (and two or more genomes), `<results>\Cumulative_results.xlsx`
 contains:
 
 | Sheet | Contents |
 | --- | --- |
-| `Summary` | One row per assembly |
+| `Summary` | One row per assembly, with each mutation and its resistance |
 | `AMR_matrix` | Assembly × gene matrix of primary calls, colour-coded by identity, with the drug class above each gene |
-| `Mutations_matrix` | Same layout, for point mutations |
+| `Mutations_matrix` | Assembly × gene; each cell states the change(s) the assembly carries (`S83L; D87N`, `G134AfsTer11`), with the resistance above each gene |
 | `Virulence_matrix` | Same layout, for virulence genes |
 | `Plasmids_matrix` | Same layout, for plasmid replicons |
 | `All_hits` | Every hit, with an `Assembly` column |
@@ -225,8 +307,9 @@ contains:
 
 HYDRA-Win runs upstream Hydra's own analysis code. It uses a pinned copy of
 `hydra_amr` from [iowa69/hydra](https://github.com/iowa69/hydra) at commit `6d36c10`,
-with two small, documented Windows patches (see `src/hydra_amr/VENDORED.txt`). With
-Automatic settings, the analysis matches upstream's `--preset deep`:
+with two small, documented Windows patches and the mutation-detail change proposed to
+upstream (see `src/hydra_amr/VENDORED.txt`). With Automatic settings, the calls match
+upstream's `--preset deep`:
 
 * every installed gene database
 * AMRFinderPlus translated search with `--plus` elements
@@ -259,13 +342,14 @@ Two pieces are added for Windows:
   with the core VFDB set, and it's by far the slowest search.
 * The species sketches cover Enterobacterales. Other genera are named from their MLST
   scheme, as in upstream.
-* PubMLST, CARD, VFDB, ARG-ANNOT, MEGARes, *E. coli* VF and EcOH need an internet
-  connection on the first launch.
+* PubMLST and CARD need an internet connection on the first launch, or a copy
+  imported from another PC.
 
 ## Databases
 
-The release workflow builds databases from their upstream sources with upstream
-Hydra's own fetchers. Whether a database ships inside the zip depends on its licence.
+The release workflow builds the databases from their upstream sources with upstream
+Hydra's own fetchers, on the date recorded in `db\DATABASES.txt`. Twelve ship inside
+the zip; the two whose terms withhold redistribution are downloaded on your PC.
 
 | Database | How you get it | Licence / terms | Citation |
 | --- | --- | --- | --- |
@@ -274,19 +358,26 @@ Hydra's own fetchers. Whether a database ships inside the zip depends on its lic
 | PlasmidFinder | in the zip | Apache-2.0 | Carattoli et al. 2014, Antimicrob Agents Chemother 58:3895 |
 | SCCmecFinder | in the zip | Apache-2.0 | Kaya et al. 2018, mSphere 3:e00612-17 |
 | Kleborate typing loci and species sketches (v3.2.4) | in the zip | GPL-3.0 | Lam et al. 2021, Nat Commun 12:4188; Ondov et al. 2016, Genome Biol 17:132 |
-| PubMLST 7-locus schemes | first launch | PubMLST terms (redistribution of downloaded data restricted since 2025) | Jolley, Bray & Maiden 2018, Wellcome Open Res 3:124 |
-| CARD | first launch | CARD terms (free for academic/non-commercial use, no redistribution) | Alcock et al. 2023, Nucleic Acids Res 51:D690 |
-| VFDB (core) | first launch | No redistribution licence stated | Liu et al. 2022, Nucleic Acids Res 50:D912 |
-| ARG-ANNOT | first launch, from abricate's repository | No redistribution licence stated | Gupta et al. 2014, Antimicrob Agents Chemother 58:212 |
-| MEGARes | first launch, from abricate's repository | No redistribution licence stated | Bonin et al. 2023, Nucleic Acids Res 51:D744 |
-| *E. coli* VF | first launch, from abricate's repository | No explicit data licence | [phac-nml/ecoli_vf](https://github.com/phac-nml/ecoli_vf) |
-| EcOH | first launch, from abricate's repository | No explicit data licence | Ingle et al. 2016, Microb Genom 2:e000064 |
+| VFDB (core) | in the zip, from VFDB (`VFDB_setA_nt.fas.gz`) | The source states no licence | Liu et al. 2022, Nucleic Acids Res 50:D912 |
+| ARG-ANNOT | in the zip, from abricate's repository (pinned commit) | The source states no licence | Gupta et al. 2014, Antimicrob Agents Chemother 58:212 |
+| MEGARes | in the zip, from abricate's repository (pinned commit) | The source states no licence | Bonin et al. 2023, Nucleic Acids Res 51:D744 |
+| *E. coli* VF | in the zip, from abricate's repository (pinned commit) | The source states no licence | [phac-nml/ecoli_vf](https://github.com/phac-nml/ecoli_vf) |
+| EcOH | in the zip, from abricate's repository (pinned commit) | The source states no licence | Ingle et al. 2016, Microb Genom 2:e000064 |
+| PubMLST 7-locus schemes | downloaded on first launch | PubMLST terms: data downloaded since 2025 may not be redistributed or repackaged | Jolley, Bray & Maiden 2018, Wellcome Open Res 3:124 |
+| CARD | downloaded on first launch | CARD terms: no redistribution without McMaster University's written consent; free for academic/non-commercial use | Alcock et al. 2023, Nucleic Acids Res 51:D690 |
+
+VFDB, ARG-ANNOT, MEGARes, *E. coli* VF and EcOH state no licence at all. They are
+bundled at the project owner's request, as abricate's public repository has long
+redistributed them, with their sources, dates and citations in `db\DATABASES.txt`. If
+you hold rights in one of them and want it removed from the zip, please
+[open an issue](https://github.com/iowa69/HYDRA-Win/issues) and it will go back to
+being a first-launch download.
 
 The `db` folder in the zip contains `DATABASES.txt` and the licence texts.
 
-If a first-launch download fails, the analysis still runs with the databases that are
-available. The `Summary` sheet lists what was missing, and the download is retried on
-the next run. Commercial users must check the CARD and PubMLST terms themselves.
+If a first-launch download fails, the analysis still runs with the other databases,
+and says what was not done (see [When a download fails](#when-a-download-fails)).
+Commercial users must check the CARD and PubMLST terms themselves.
 
 NCBI BLAST+ 2.16.0 is in the zip under `blast\`. It's public domain; see
 `blast\LICENSE`. It comes with the Microsoft Visual C++ runtime DLLs it needs, which
@@ -304,13 +395,19 @@ through these steps:
 5. Zip
 6. Smoke test of the packaged exe: first launch, then `--cli --cumulative` on two public
    NCBI genomes (*K. pneumoniae* HS11286 and *E. coli* EC958), with assertions on
-   sheets, hits, coordinates and known genes and mutations, then a `--cli` run with
-   custom thresholds and a folder of FASTQ files among the inputs
+   sheets, hits, coordinates and known genes, and the point mutations and disruptions
+   AMRFinderPlus 4.2.7 reports for these genomes, under the same names. Every reported
+   codon is then re-read from the FASTA by an independent script
+   (`tools/verify_mutations.py`): it must encode the reported amino acid, and the
+   reference codon must differ from it exactly as the reported base change says. Then a
+   `--cli` run with custom thresholds and a folder of FASTQ files among the inputs, and a
+   fresh unzip run `--offline`: the twelve bundled databases must produce results and
+   PubMLST and CARD must be reported as missing, not as empty results
 7. Window test on a 1366×768 screen: the packaged app is driven through its widgets
    (add genomes, settings, a FASTQ drop, **Run analysis**) until the table shows the
-   results. The test checks the table, the workbooks (the same hits as the `--cli` run)
-   and that the window and its log fit on the screen, and it saves the window
-   screenshots shown above
+   results, then opens **Databases…**. The test checks the table, the workbooks (the same
+   hits as the `--cli` run) and that the window and its log fit on the screen, and it
+   saves the window screenshots shown above
 
 A `v*` tag publishes the zip as a release.
 

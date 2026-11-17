@@ -1069,8 +1069,8 @@ SHORT_MISSING = {"pubmlst": "PubMLST (no MLST)", "card": "CARD (not screened)",
 class DatabasesDialog:
     """Every database: how it is installed, its status or why it is missing."""
 
-    COLUMNS = (("title", "Database", 30), ("route", "How it is installed", 24),
-               ("status", "Status", 56))
+    COLUMNS = (("title", "Database", 36), ("route", "How it is installed", 22),
+               ("status", "Status", 52))
 
     def __init__(self, app: App):
         self.app = app

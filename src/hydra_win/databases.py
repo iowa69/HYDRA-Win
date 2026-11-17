@@ -113,7 +113,7 @@ IMPACT = {
 }
 
 #: Display names.
-TITLES = {"protein": "AMRFinderPlus proteins + point mutations", "ncbi": "NCBI AMRFinderPlus genes",
+TITLES = {"protein": "AMRFinderPlus proteins, point mutations", "ncbi": "AMRFinderPlus genes (NCBI)",
           "resfinder": "ResFinder", "plasmidfinder": "PlasmidFinder", "sccmec": "SCCmecFinder",
           "lineage": "Kleborate lineage modules", "species": "Kleborate species sketches",
           "vfdb": "VFDB (core)", "argannot": "ARG-ANNOT", "megares": "MEGARes",
