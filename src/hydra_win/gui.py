@@ -312,12 +312,24 @@ class App:
 
     # ------------------------------------------------------------- window
     def _image(self, size: int) -> tk.PhotoImage | None:
+        """The logo at *size*, or None if Tk will not give it to us.
+
+        The logo is decoration. Tk occasionally refuses to create an image -
+        seen on Windows as a bare TclError from ``image create photo``, more
+        often the more Tk interpreters a process has made and destroyed - and
+        a window that will not open because its logo would not load is a
+        worse failure than a window without a logo.
+        """
         key = f"logo-{size}"
         if key not in self.images:
             path = ASSETS / f"{key}.png"
             if not path.exists():
                 return None
-            self.images[key] = tk.PhotoImage(master=self.root, file=str(path))
+            try:
+                self.images[key] = tk.PhotoImage(master=self.root, file=str(path))
+            except tk.TclError as exc:
+                LOG.debug("could not load %s: %s", path.name, exc or "no reason given")
+                return None
         return self.images[key]
 
     def _logo(self, target: int) -> tk.PhotoImage | None:

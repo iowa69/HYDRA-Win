@@ -36,6 +36,35 @@ def touch(path: Path, text: str = ">c\nACGT\n") -> Path:
     return path
 
 
+def test_the_window_opens_even_when_tk_refuses_the_logo(monkeypatch):
+    """The logo is decoration; a window that will not open without it is worse.
+
+    Tk on Windows intermittently refuses `image create photo` with a bare
+    TclError, which used to take the whole window - and the test suite - down
+    with it.
+    """
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display")
+    root.withdraw()
+    from hydra_win import gui
+
+    def refuse(*_args, **_kwargs):
+        raise tk.TclError()
+
+    monkeypatch.setattr(gui.tk, "PhotoImage", refuse)
+    log = logging.getLogger("hydra")
+    handlers, propagate, level = list(log.handlers), log.propagate, log.level
+    try:
+        window = gui.App(root, check_db=False)
+        assert window.root.title().startswith("HYDRA-Win")
+        assert window._image(48) is None
+    finally:
+        root.destroy()
+        log.handlers[:], log.propagate, log.level = handlers, propagate, level
+
+
 def test_branding(app):
     assert app.root.title() == f"HYDRA-Win {__version__}"
 
