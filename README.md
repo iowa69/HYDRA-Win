@@ -16,6 +16,47 @@ workbook per genome.
 
 You don't install anything. There's no conda, no admin rights and no console window.
 
+## Screenshots
+
+The window is shown as captured on Windows 11. The report views are the workbooks
+HYDRA-Win produced for two public genomes, *K. pneumoniae* HS11286 and *E. coli* EC958.
+
+**The window:** drop your assemblies, tick *Cumulative_results* if you want it, click *Run analysis*.
+
+<p align="center"><img src="docs/screenshots/01-window.png" alt="The HYDRA-Win window with two genomes loaded" width="720"></p>
+
+**Pivot sheet:** every locus against every database, shaded by % identity, with its location.
+
+<p align="center"><img src="docs/screenshots/06-genome-pivot.png" alt="Pivot sheet of one genome" width="900"></p>
+
+**Summary sheet:** species, MLST, scores, typing and counts for one genome.
+
+<p align="center"><img src="docs/screenshots/02-genome-summary.png" alt="Summary sheet of one genome" width="720"></p>
+
+**AMR_genes sheet:** the raw hits, each with contig, start, end and strand.
+
+<p align="center"><img src="docs/screenshots/03-genome-amr-genes.png" alt="AMR_genes sheet with contig coordinates" width="900"></p>
+
+**Point_mutations sheet**
+
+<p align="center"><img src="docs/screenshots/04-genome-point-mutations.png" alt="Point_mutations sheet" width="900"></p>
+
+**Plasmids sheet**
+
+<p align="center"><img src="docs/screenshots/05-genome-plasmids.png" alt="Plasmids sheet with replicons" width="900"></p>
+
+**Cumulative_results, Summary:** one row per assembly.
+
+<p align="center"><img src="docs/screenshots/07-cumulative-summary.png" alt="Cumulative summary, one row per assembly" width="900"></p>
+
+**Cumulative_results, AMR matrix:** assemblies against genes, grouped by drug class.
+
+<p align="center"><img src="docs/screenshots/08-cumulative-amr-matrix.png" alt="Cumulative AMR matrix" width="900"></p>
+
+**Cumulative_results, Mutations matrix**
+
+<p align="center"><img src="docs/screenshots/09-cumulative-mutations-matrix.png" alt="Cumulative point-mutation matrix" width="720"></p>
+
 ## Get started
 
 1. Click the green **Download** button above (or get `HYDRA-Win-windows-x64.zip` from
