@@ -39,25 +39,28 @@ jobs:
             echo "tag ${GITHUB_REF#refs/tags/} does not match version $version"; exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "zip=Hydra-win-v$version-windows-x64.zip" >> "$GITHUB_OUTPUT"
+          echo "zip=HYDRA-Win-v$version-windows-x64.zip" >> "$GITHUB_OUTPUT"
 
-      - name: Build Hydra-win.exe (PyInstaller, one folder, windowed)
+      - name: Build HYDRA-Win.exe (PyInstaller, one folder, windowed)
         run: python -m PyInstaller packaging/hydra-win.spec --noconfirm --clean
 
       - name: Bundle NCBI BLAST+
-        run: python tools/ci.py blast dist/Hydra-win
+        run: python tools/ci.py blast dist/HYDRA-Win
 
       - name: Build the redistributable databases with the packaged exe
-        run: python tools/ci.py build-db dist/Hydra-win
+        run: python tools/ci.py build-db dist/HYDRA-Win
 
       - name: Zip
-        run: python tools/ci.py package dist/Hydra-win "release/${{ steps.version.outputs.zip }}"
+        run: python tools/ci.py package dist/HYDRA-Win "release/${{ steps.version.outputs.zip }}"
 
-      - name: Smoke test the packaged exe (first launch, --cli, --cumulative)
+      - name: Smoke test the packaged exe (first launch, --cli, --cumulative, custom thresholds)
         run: python tools/ci.py smoke "release/${{ steps.version.outputs.zip }}" "${{ runner.temp }}/smoke"
 
-      - name: Smoke test the window
-        run: python tools/ci.py gui-smoke dist/Hydra-win "${{ runner.temp }}/smoke"
+      - name: Laptop-sized screen (1366x768) for the window test
+        run: python tools/ci.py display 1366 768
+
+      - name: Run an analysis from the window (drives the widgets, screenshots each step)
+        run: python tools/ci.py gui-smoke "${{ runner.temp }}/smoke"
 
       - name: Upload smoke-test evidence
         if: always()
@@ -66,12 +69,21 @@ jobs:
           name: smoke-test
           path: |
             ${{ runner.temp }}/smoke/smoke-results
+            ${{ runner.temp }}/smoke/results custom
+            ${{ runner.temp }}/smoke/gui results ä
             ${{ runner.temp }}/smoke/*.log
             ${{ runner.temp }}/smoke/*.txt
             ${{ runner.temp }}/smoke/*.json
-            ${{ runner.temp }}/smoke/gui-screenshot.png
             dist/build-db.log
             dist/db-status.json
+          if-no-files-found: warn
+
+      - name: Upload window screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-screenshots
+          path: ${{ runner.temp }}/smoke/gui-screenshots/*.png
           if-no-files-found: warn
 
       - name: Upload zip

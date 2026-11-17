@@ -1,4 +1,4 @@
-"""Headless entry: ``Hydra-win.exe --cli <fasta...> --out DIR [--cumulative]``.
+"""Headless entry: ``HYDRA-Win.exe --cli <fasta...> --out DIR [--cumulative]``.
 
 It calls exactly the same :func:`hydra_win.core.analyse` as the window does.
 Maintenance switches used by the release workflow live here too.
@@ -13,7 +13,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import UPSTREAM_COMMIT, __version__
+from . import APP_NAME, UPSTREAM_COMMIT, __version__
 
 LOG = logging.getLogger("hydra")
 
@@ -71,18 +71,62 @@ def _arm_hang_dump(log_path: Path | None) -> None:
     faulthandler.dump_traceback_later(float(seconds), repeat=True, file=handle)
 
 
+def _setting(parse):
+    """argparse type: 'auto' or a valid value, with the GUI's own messages."""
+    def convert(text):
+        from .core import SettingsError  # noqa: PLC0415
+
+        try:
+            return parse(text)
+        except SettingsError as exc:
+            raise argparse.ArgumentTypeError(str(exc)) from None
+    return convert
+
+
+def _percent(label):
+    def parse(text):
+        from .core import parse_percent  # noqa: PLC0415
+
+        return parse_percent(text, label)
+    return _setting(parse)
+
+
+def _threads(text):
+    from .core import parse_threads  # noqa: PLC0415
+
+    return parse_threads(text)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="Hydra-win.exe --cli",
-        description="Hydra-win headless mode: analyse bacterial assemblies and write Excel "
-                    "workbooks. Without --cli the window opens.")
+        prog=f"{APP_NAME}.exe --cli",
+        description=f"{APP_NAME} headless mode: analyse bacterial genome assemblies (FASTA) "
+                    "and write Excel workbooks. Reads (FASTQ) are not analysed. Without --cli "
+                    "the window opens.")
     parser.add_argument("--cli", action="store_true", help="run without the window")
     parser.add_argument("inputs", nargs="*", type=Path,
                         help="FASTA assemblies (.fasta .fa .fna .fas, optionally .gz) or folders")
     parser.add_argument("--out", type=Path, help="output folder")
     parser.add_argument("--cumulative", action="store_true",
                         help="also write Cumulative_results.xlsx (more than one genome)")
-    parser.add_argument("--threads", type=int, default=None, help="CPU threads (default: all)")
+    settings = parser.add_argument_group(
+        "settings (default: Automatic, i.e. upstream Hydra's own thresholds)")
+    from .core import automatic_text  # noqa: PLC0415
+
+    settings.add_argument("--min-identity", type=_percent("Minimum identity"), default=None,
+                          metavar="PCT",
+                          help="minimum % identity for nucleotide database hits. Automatic: "
+                               f"{automatic_text('identity')} (upstream's global and "
+                               "per-database defaults). A value applies to every nucleotide "
+                               "database, as upstream's --min-identity does".replace("%", "%%"))
+    settings.add_argument("--min-coverage", type=_percent("Minimum coverage"), default=None,
+                          metavar="PCT",
+                          help="minimum % of the reference gene covered. Automatic: "
+                               f"{automatic_text('coverage')}. A value applies to every "
+                               "nucleotide database, as upstream's --min-coverage does"
+                               .replace("%", "%%"))
+    settings.add_argument("--threads", type=_setting(_threads), default=None, metavar="N",
+                          help="CPU threads (Automatic: all cores)")
     parser.add_argument("--offline", action="store_true",
                         help="do not download missing first-launch databases")
     parser.add_argument("--keep-temp", action="store_true", help="keep the scratch directory")
@@ -111,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
     _arm_hang_dump(args.log)
 
     if args.version:
-        print(f"Hydra-win {__version__} (upstream Hydra {UPSTREAM_COMMIT[:7]})")
+        print(f"{APP_NAME} {__version__} (upstream Hydra {UPSTREAM_COMMIT[:7]})")
         return 0
 
     from hydra_amr.utils import HydraError  # noqa: PLC0415
@@ -153,14 +197,18 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("no inputs: give FASTA files or folders")
         if args.out is None:
             parser.error("--out DIR is required")
+        settings = core.Settings(min_identity=args.min_identity,
+                                 min_coverage=args.min_coverage, threads=args.threads)
         result = core.analyse(args.inputs, args.out, cumulative=args.cumulative,
-                              threads=args.threads, offline=args.offline,
-                              keep_temp=args.keep_temp)
+                              offline=args.offline, keep_temp=args.keep_temp,
+                              settings=settings)
         for name, path in result.workbooks.items():
             print(f"{name}\t{path}")
         if result.cumulative:
             print(f"Cumulative_results\t{result.cumulative}")
-        return 0
+        for name, error in result.failed.items():
+            print(f"{name}\tFAILED: {error}")
+        return 1 if result.failed else 0
     except HydraError as exc:
         LOG.error("%s", exc)
         return 1

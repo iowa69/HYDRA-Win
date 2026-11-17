@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check Hydra-win workbooks against upstream Hydra's JSON for the same genomes.
+"""Check HYDRA-Win workbooks against upstream Hydra's JSON for the same genomes.
 
     compare_upstream.py HYDRA_JSON HYDRA_WIN_OUTDIR
 

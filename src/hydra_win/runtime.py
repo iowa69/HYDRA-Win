@@ -2,8 +2,8 @@
 
 Layout of an unzipped release::
 
-    Hydra-win/
-      Hydra-win.exe
+    HYDRA-Win/
+      HYDRA-Win.exe
       _internal/          Python runtime (PyInstaller)
       blast/bin/          NCBI BLAST+ executables and DLLs
       db/                 Hydra database (bundled part + first-launch downloads)
@@ -29,7 +29,10 @@ from pathlib import Path
 
 from . import winsafe
 
-APP_NAME = "Hydra-win"
+#: Folder name under %LOCALAPPDATA% (and the other fallbacks) for the home when
+#: the application folder is not writable. Kept as v0.1.0 spelled it so the
+#: databases a previous version downloaded there are found again.
+DATA_DIR_NAME = "Hydra-win"
 
 
 def is_frozen() -> bool:
@@ -57,7 +60,7 @@ def _writable(path: Path) -> bool:
 def _user_data_dir() -> Path:
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-        return Path(base) / APP_NAME
+        return Path(base) / DATA_DIR_NAME
     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
     return Path(base) / "hydra-win"
 
@@ -90,9 +93,20 @@ def _home_candidates() -> list[Path]:
     if os.name == "nt":
         # ASCII-only fallbacks for accounts whose profile path is not ASCII and
         # whose drive has no 8.3 short names.
-        out.append(Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / APP_NAME)
-        out.append(Path(os.environ.get("PUBLIC", r"C:\Users\Public")) / APP_NAME)
+        out.append(Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / DATA_DIR_NAME)
+        out.append(Path(os.environ.get("PUBLIC", r"C:\Users\Public")) / DATA_DIR_NAME)
     return out
+
+
+def legacy_db_roots() -> list[Path]:
+    """Database folders of the fallback homes, where an earlier version may have
+    downloaded databases (see :func:`hydra_win.databases.adopt`)."""
+    if os.environ.get("HYDRA_WIN_HOME") or os.environ.get("HYDRA_WIN_DB"):
+        return []
+    homes = _home_candidates()
+    if is_frozen():
+        homes = homes[1:]  # the application folder itself
+    return [home / "db" for home in homes]
 
 
 def _resolve_home() -> tuple[Path, Path]:
@@ -110,7 +124,7 @@ def _resolve_home() -> tuple[Path, Path]:
         if alias is not None:
             return candidate, alias
     if first_writable is None:
-        raise OSError("no writable folder for Hydra-win's databases and scratch files")
+        raise OSError("no writable folder for HYDRA-Win's databases and scratch files")
     return first_writable, first_writable
 
 

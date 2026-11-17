@@ -1,4 +1,4 @@
-"""Which reference databases Hydra-win uses, and how each one reaches the user.
+"""Which reference databases HYDRA-Win uses, and how each one reaches the user.
 
 Two routes, decided by each source's licence:
 
@@ -57,7 +57,7 @@ class Route:
     why: str
 
 
-#: Every database Hydra-win installs, in install order (protein first: the
+#: Every database HYDRA-Win installs, in install order (protein first: the
 #: nucleotide importers borrow its drug-class annotation).
 ROUTES: tuple[Route, ...] = (
     Route("protein", "bundled", "public domain (NCBI AMRFinderPlus)",
@@ -109,6 +109,47 @@ def source_url(name: str) -> str:
 
 def missing(store: DatabaseStore, names: tuple[str, ...] = ALL) -> list[str]:
     return [name for name in names if not store.is_installed(name)]
+
+
+def adopt(store: DatabaseStore, names, sources) -> list[str]:
+    """Copy databases an earlier install already downloaded into another folder.
+
+    v0.1.0 kept its databases in ``%LOCALAPPDATA%\\Hydra-win`` (or another
+    fallback home) when its own folder was not writable; a newer version
+    unzipped somewhere writable reuses them instead of downloading again.
+    """
+    adopted: list[str] = []
+    for root in sources:
+        root = Path(root)
+        try:
+            if not (root / "manifest.json").exists() or root.resolve() == store.root.resolve():
+                continue
+            other = DatabaseStore(root)
+            entries = other.installed()
+        except (OSError, HydraError):
+            continue
+        for name in names:
+            if name in adopted or store.is_installed(name) or not other.is_installed(name):
+                continue
+            entry = dict(entries[name])
+            relative = entry.get("path", "")
+            if not relative:
+                continue
+            source, target = root / relative, store.root / relative
+            try:
+                if source.is_dir():
+                    shutil.copytree(source, target, dirs_exist_ok=True)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, target)
+            except OSError as exc:
+                LOG.warning("could not reuse %s from %s: %s", name, root, exc)
+                continue
+            entry.pop("installed", None)
+            store.record(name, **entry)
+            LOG.info("reused %s from %s (downloaded by an earlier version)", name, root)
+            adopted.append(name)
+    return adopted
 
 
 def status(store: DatabaseStore) -> list[dict]:
@@ -215,11 +256,11 @@ def build_bundle(db_root: Path, names: tuple[str, ...] = BUNDLED) -> Path:
 
 def write_notice(db_root: Path, kleborate_source: str = "") -> None:
     lines = [
-        "Hydra-win reference databases",
+        "HYDRA-Win reference databases",
         "=============================",
         "",
         "Each database keeps its own licence. Databases marked 'bundled' were built",
-        "from the upstream source by the Hydra-win release workflow and are",
+        "from the upstream source by the HYDRA-Win release workflow and are",
         "redistributed under that source's licence; databases marked 'first launch'",
         "are not redistributed and are downloaded from their source on your computer.",
         "",
@@ -245,4 +286,4 @@ def require_core(store: DatabaseStore) -> None:
     if not store.is_installed("protein") or not store.is_installed("ncbi"):
         raise HydraError(
             f"the bundled databases are missing from {store.root}; re-extract the "
-            "Hydra-win zip (the 'db' folder must sit next to Hydra-win.exe)")
+            "HYDRA-Win zip (the 'db' folder must sit next to HYDRA-Win.exe)")

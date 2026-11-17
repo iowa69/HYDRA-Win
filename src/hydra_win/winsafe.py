@@ -3,7 +3,7 @@
 Installed as :data:`hydra_amr.utils.RUN_HOOK`, so every BLAST+ call upstream
 makes goes through :func:`hook` first. It does three things:
 
-* runs the tool from a fixed working directory (the Hydra-win home, which
+* runs the tool from a fixed working directory (the HYDRA-Win home, which
   holds both ``db`` and ``work``) and rewrites ``-db``/``-query``/``-out``/``-in``
   to paths relative to it. BLAST+ treats ``-db`` as a space-separated list and,
   on Windows, opens files through the ANSI code page, so a database under
@@ -144,7 +144,7 @@ def rewrite(cmd: list[str], base: Path | None = None) -> list[str]:
 
 
 def hook(cmd: list[str], has_input: bool) -> tuple[list[str], dict]:
-    """The :data:`hydra_amr.utils.RUN_HOOK` Hydra-win installs."""
+    """The :data:`hydra_amr.utils.RUN_HOOK` HYDRA-Win installs."""
     with _lock:
         listeners = list(_listeners)
     for callback in listeners:

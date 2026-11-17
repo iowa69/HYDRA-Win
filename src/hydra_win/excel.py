@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -276,6 +276,18 @@ def species_text(result: SampleResult) -> str:
     return result.species.name if result.species else "unknown"
 
 
+def headline(result: SampleResult) -> dict:
+    """The few numbers the window shows in a genome's row once it is done."""
+    counts = category_counts(result)
+    m = result.mlst
+    st = m.sequence_type if m and m.sequence_type not in (None, "", "-") else "-"
+    mlst = f"ST{st} ({m.scheme})" if st != "-" and m.scheme not in (None, "", "-") else (
+        f"ST{st}" if st != "-" else "-")
+    return {"species": species_text(result), "mlst": mlst, "amr": counts[AMR],
+            "mutations": counts[MUTATION], "virulence": counts[VIRULENCE],
+            "plasmids": counts[PLASMID]}
+
+
 @dataclass
 class RunInfo:
     """Run-level facts stamped into every workbook."""
@@ -287,6 +299,9 @@ class RunInfo:
     missing_databases: str = ""
     thresholds: str = ""
     notes: str = ""
+    #: The user-adjustable settings actually used (label -> value), so every
+    #: result can be traced to its thresholds.
+    settings: dict = field(default_factory=dict)
 
 
 def _kv(ws: Worksheet, row: int, key: str, value, *, colour: str | None = None) -> int:
@@ -310,7 +325,7 @@ def _section(ws: Worksheet, row: int, title: str) -> int:
 
 
 def write_genome_summary(ws: Worksheet, result: SampleResult, info: RunInfo) -> None:
-    ws.cell(row=1, column=1, value=f"Hydra-win report: {result.sample}").font = TITLE_FONT
+    ws.cell(row=1, column=1, value=f"HYDRA-Win report: {result.sample}").font = TITLE_FONT
     row = 3
     row = _section(ws, row, "Identification")
     row = _kv(ws, row, "Assembly", result.sample)
@@ -369,8 +384,16 @@ def write_genome_summary(ws: Worksheet, result: SampleResult, info: RunInfo) -> 
     row = _kv(ws, row, "Warnings", "; ".join(result.warnings) or "none")
 
     row += 1
+    row = _section(ws, row, "Settings used")
+    if info.settings:
+        for label, value in info.settings.items():
+            row = _kv(ws, row, label, value)
+    else:
+        row = _kv(ws, row, "Settings", "not recorded")
+
+    row += 1
     row = _section(ws, row, "Run")
-    for label, value in (("Hydra-win version", info.app_version),
+    for label, value in (("HYDRA-Win version", info.app_version),
                          ("Upstream Hydra", info.upstream), ("Date", info.date),
                          ("Databases (version)", info.databases),
                          ("Databases not available", info.missing_databases or "none"),
@@ -538,7 +561,7 @@ def write_pivot(ws: Worksheet, result: SampleResult, databases: Sequence[str]) -
             if call.resolution == "PARTIAL":
                 cell.font = PARTIAL_FONT
             if cat != MUTATION and call.gene != p.gene:
-                cell.comment = Comment(f"{name}: {call.gene}", "Hydra-win")
+                cell.comment = Comment(f"{name}: {call.gene}", "HYDRA-Win")
         tail_col = 4 + len(db_columns)
         best = max(locus.calls, key=lambda h: h.identity_pct)
         strand = p.strand or "+"
@@ -726,9 +749,11 @@ def write_cumulative_workbook(results: Sequence[SampleResult], path: Path,
     ws.auto_filter.ref = f"A1:{get_column_letter(len(titles))}{len(rows) + 1}"
     _autosize(ws, maximum=60)
     note_row = len(rows) + 3
-    for label, value in (("Hydra-win", info.app_version), ("Upstream Hydra", info.upstream),
-                         ("Date", info.date), ("Databases", info.databases),
-                         ("Notes", info.notes)):
+    run_rows = [("HYDRA-Win", info.app_version), ("Upstream Hydra", info.upstream),
+                ("Date", info.date), ("Databases", info.databases)]
+    run_rows += list(info.settings.items())
+    run_rows += [("Thresholds", info.thresholds), ("Notes", info.notes)]
+    for label, value in run_rows:
         ws.cell(row=note_row, column=1, value=label).font = Font(bold=True)
         ws.cell(row=note_row, column=2, value=_clean(value))
         note_row += 1

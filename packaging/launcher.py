@@ -1,4 +1,4 @@
-"""PyInstaller entry point for Hydra-win.exe."""
+"""PyInstaller entry point for HYDRA-Win.exe."""
 
 from hydra_win.app import main
 

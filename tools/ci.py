@@ -5,8 +5,13 @@
     ci.py build-db DIST             build the bundled databases with the packaged exe
     ci.py package DIST ZIP          clean scratch files and zip the app folder
     ci.py smoke ZIP WORK            unzip into an awkward path, run --cli on public
-                                    genomes with --cumulative, assert the workbooks
-    ci.py gui-smoke APPDIR WORK     open the real window briefly, screenshot, assert
+                                    genomes with --cumulative, assert the workbooks;
+                                    then a run with custom thresholds and FASTQ inputs
+    ci.py display WIDTH HEIGHT      set the runner's screen resolution (best effort)
+    ci.py gui-smoke WORK            drive the real window of the unzipped app: add the
+                                    genomes, open the settings, drop FASTQ files, click
+                                    Run, wait for the table to finish; screenshot the
+                                    window at each step and assert the results
 
 Test genomes are public NCBI RefSeq assemblies downloaded at run time:
 K. pneumoniae HS11286 (ST11, KPC-2) and E. coli EC958 (ST131, CTX-M-15).
@@ -17,7 +22,6 @@ from __future__ import annotations
 import gzip
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +31,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+APP = "HYDRA-Win"
 BLAST_VERSION = "2.16.0"
 BLAST_URL = ("https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/"
              f"{BLAST_VERSION}/ncbi-blast-{BLAST_VERSION}+-x64-win64.tar.gz")
@@ -152,7 +157,7 @@ def cmd_blast(dist: Path) -> None:
 
 
 def cmd_build_db(dist: Path) -> None:
-    exe = dist / "Hydra-win.exe"
+    exe = dist / f"{APP}.exe"
     log_file = dist.parent / "build-db.log"
     rc = run_exe(exe, ["--build-db", str(dist / "db"), "--log", str(log_file), "-v"],
                  timeout=3600, log_file=log_file)
@@ -300,7 +305,7 @@ def cmd_smoke(zip_path: Path, work: Path) -> None:
     shutil.rmtree(app_parent, ignore_errors=True)
     with zipfile.ZipFile(zip_path) as zf:
         zf.extractall(app_parent)
-    app = next(app_parent.glob("*/Hydra-win.exe"))
+    app = next(app_parent.glob(f"*/{APP}.exe"))
     genomes = fetch_genomes(work / "genomes ö dir")
     out = work / "results ä folder"
     shutil.rmtree(out, ignore_errors=True)
@@ -321,7 +326,7 @@ def cmd_smoke(zip_path: Path, work: Path) -> None:
         if not status.get("utf8_mode"):
             raise SystemExit("the packaged exe is not running in Python UTF-8 mode")
     if rc != 0:
-        raise SystemExit(f"Hydra-win --cli exited with {rc}")
+        raise SystemExit(f"{APP} --cli exited with {rc}")
     problems = assert_outputs(out)
     for problem in problems:
         log(f"PROBLEM: {problem}")
@@ -329,34 +334,218 @@ def cmd_smoke(zip_path: Path, work: Path) -> None:
     if problems:
         raise SystemExit(f"{len(problems)} smoke-test problem(s)")
     log("smoke test passed")
+    smoke_settings(app, genomes[0], work)
 
 
-def cmd_gui_smoke(app_dir: Path, work: Path) -> None:
-    exe = app_dir / "Hydra-win.exe"
+def fake_reads(folder: Path, n: int = 6) -> Path:
+    """Synthetic FASTQ files (a single made-up read each), for the reads notice."""
+    folder.mkdir(parents=True, exist_ok=True)
+    for i in range(n):
+        sample, mate = divmod(i, 2)
+        with gzip.open(folder / f"isolate{sample + 1}_R{mate + 1}.fastq.gz", "wt") as handle:
+            handle.write("@read1\nACGTACGTACGT\n+\nIIIIIIIIIIII\n")
+    return folder
+
+
+def smoke_settings(app: Path, genome: Path, work: Path) -> None:
+    """--cli with custom thresholds and a folder of reads among the inputs."""
+    from openpyxl import load_workbook  # noqa: PLC0415
+
+    reads = fake_reads(work / "reads folder")
+    out = work / "results custom"
+    shutil.rmtree(out, ignore_errors=True)
+    log_file = work / "smoke-custom.log"
+    rc = run_exe(app, ["--cli", str(genome), str(reads), "--out", str(out), "--min-identity",
+                       "90", "--min-coverage", "80", "--threads", "2", "--log", str(log_file)],
+                 timeout=1800, log_file=log_file)
+    if rc != 0:
+        raise SystemExit(f"--cli with custom thresholds exited with {rc}")
+    problems = []
+    text = log_file.read_text(encoding="utf-8", errors="replace")
+    if "not analysing 6 FASTQ read file(s)" not in text:
+        problems.append("the FASTQ inputs were not reported in the log")
+    name = genome.name.split(".")[0]
+    wb = load_workbook(out / name / f"{name}.xlsx")
+    summary = {r[0]: r[1] for r in wb["Summary"].iter_rows(values_only=True) if r[0]}
+    for label, expected in (("Minimum identity (%)", "90% (set by user"),
+                            ("Minimum coverage (%)", "80% (set by user"),
+                            ("Threads", "2 (set by user)"),
+                            ("Equivalent upstream flags", "--min-identity 90 --min-coverage 80")):
+        if not str(summary.get(label, "")).startswith(expected):
+            problems.append(f"Summary {label!r} = {summary.get(label)!r}")
+    nucleotide = [h for h in _rows(wb["All_hits"])
+                  if h["Database"] != "protein" and h["Method"] in ("BLASTN", "PARTIALN")]
+    low = [h for h in nucleotide if h["Identity (%)"] < 90 or h["Coverage (%)"] < 80]
+    if not nucleotide or low:
+        problems.append(f"{len(low)} of {len(nucleotide)} nucleotide hits below 90%/80%")
+    if any(p.name.startswith("isolate") for p in out.iterdir()):
+        problems.append("a FASTQ file was analysed")
+    log(f"custom thresholds: {len(nucleotide)} nucleotide hits, all >= 90% identity / 80% "
+        "coverage; settings recorded in the Summary sheet")
+    for problem in problems:
+        log(f"PROBLEM: {problem}")
+    if problems:
+        raise SystemExit(f"{len(problems)} custom-settings problem(s)")
+
+
+def cmd_display(width: Path, height: Path) -> None:
+    """Change the screen resolution, so the window is tested at laptop size."""
+    if os.name != "nt":
+        return
+    import ctypes  # noqa: PLC0415
+    from ctypes import wintypes  # noqa: PLC0415
+
+    class DEVMODEW(ctypes.Structure):
+        _fields_ = [("dmDeviceName", wintypes.WCHAR * 32), ("dmSpecVersion", wintypes.WORD),
+                    ("dmDriverVersion", wintypes.WORD), ("dmSize", wintypes.WORD),
+                    ("dmDriverExtra", wintypes.WORD), ("dmFields", wintypes.DWORD),
+                    ("dmPositionX", wintypes.LONG), ("dmPositionY", wintypes.LONG),
+                    ("dmDisplayOrientation", wintypes.DWORD),
+                    ("dmDisplayFixedOutput", wintypes.DWORD), ("dmColor", ctypes.c_short),
+                    ("dmDuplex", ctypes.c_short), ("dmYResolution", ctypes.c_short),
+                    ("dmTTOption", ctypes.c_short), ("dmCollate", ctypes.c_short),
+                    ("dmFormName", wintypes.WCHAR * 32), ("dmLogPixels", wintypes.WORD),
+                    ("dmBitsPerPel", wintypes.DWORD), ("dmPelsWidth", wintypes.DWORD),
+                    ("dmPelsHeight", wintypes.DWORD), ("dmDisplayFlags", wintypes.DWORD),
+                    ("dmDisplayFrequency", wintypes.DWORD), ("dmICMMethod", wintypes.DWORD),
+                    ("dmICMIntent", wintypes.DWORD), ("dmMediaType", wintypes.DWORD),
+                    ("dmDitherType", wintypes.DWORD), ("dmReserved1", wintypes.DWORD),
+                    ("dmReserved2", wintypes.DWORD), ("dmPanningWidth", wintypes.DWORD),
+                    ("dmPanningHeight", wintypes.DWORD)]
+
+    user32 = ctypes.windll.user32
+    w, h = int(str(width)), int(str(height))
+    log(f"screen before: {user32.GetSystemMetrics(0)}x{user32.GetSystemMetrics(1)}")
+    modes, i = set(), 0
+    mode = DEVMODEW()
+    mode.dmSize = ctypes.sizeof(DEVMODEW)
+    while user32.EnumDisplaySettingsW(None, i, ctypes.byref(mode)):
+        modes.add((mode.dmPelsWidth, mode.dmPelsHeight))
+        i += 1
+    log(f"{len(modes)} display modes; {w}x{h} listed: {(w, h) in modes}")
+    current = DEVMODEW()
+    current.dmSize = ctypes.sizeof(DEVMODEW)
+    user32.EnumDisplaySettingsW(None, ctypes.c_uint32(0xFFFFFFFF).value, ctypes.byref(current))
+    current.dmPelsWidth, current.dmPelsHeight = w, h
+    current.dmFields = 0x80000 | 0x100000  # DM_PELSWIDTH | DM_PELSHEIGHT
+    rc = user32.ChangeDisplaySettingsW(ctypes.byref(current), 0)
+    log(f"ChangeDisplaySettings -> {rc}; screen now: "
+        f"{user32.GetSystemMetrics(0)}x{user32.GetSystemMetrics(1)}")
+
+
+def _hit_keys(book: Path) -> set:
+    from openpyxl import load_workbook  # noqa: PLC0415
+
+    return {(h["Database"], h["Gene"], h["Contig"], h["Start"], h["End"], h["Strand"],
+             h["Identity (%)"]) for h in _rows(load_workbook(book)["All_hits"])}
+
+
+def cmd_gui_smoke(work: Path) -> None:
+    """Drive the window of the unzipped app (databases already downloaded by `smoke`)."""
+    from PIL import ImageGrab  # noqa: PLC0415
+
+    exe = next((work / "Hydra wïn smoke ü").glob(f"*/{APP}.exe"))
     genomes = sorted((work / "genomes ö dir").glob("*")) or fetch_genomes(work / "genomes ö dir")
+    reads = fake_reads(work / "reads folder")
+    shots = work / "gui-screenshots"
+    out = work / "gui results ä"
     report = work / "gui-report.json"
-    if report.exists():
-        report.unlink()
+    for path in (shots, out):
+        shutil.rmtree(path, ignore_errors=True)
+    report.unlink(missing_ok=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
-    proc = subprocess.Popen([str(exe), "--gui-smoke", "12", "--report", str(report),
-                             *map(str, genomes)], env=env)
-    time.sleep(8)
-    try:
-        from PIL import ImageGrab  # noqa: PLC0415
-
-        ImageGrab.grab().save(work / "gui-screenshot.png")
-        log("screenshot saved")
-    except Exception as exc:  # noqa: BLE001
-        log(f"screenshot failed: {exc}")
-    rc = proc.wait(timeout=120)
-    if rc != 0 or not report.exists():
-        raise SystemExit(f"GUI smoke failed (exit {rc}, report {report.exists()})")
+    args = [str(exe), "--gui-smoke", "--report", str(report), "--shots", str(shots),
+            "--fastq", str(reads), "--run", "--out", str(out), *map(str, genomes)]
+    log(f"running {exe.name} --gui-smoke --run ...")
+    started = time.time()
+    proc = subprocess.Popen(args, env=env)
+    taken: list[str] = []
+    while proc.poll() is None:
+        for request in sorted(shots.glob("*.request.json")) if shots.exists() else []:
+            name = request.name[: -len(".request.json")]
+            if name in taken:
+                continue
+            rect = json.loads(request.read_text(encoding="utf-8"))["rect"]
+            time.sleep(0.3)  # let the window finish painting
+            try:
+                ImageGrab.grab(bbox=tuple(rect), all_screens=True).save(shots / f"{name}.png")
+                log(f"screenshot {name} {rect}")
+            except Exception as exc:  # noqa: BLE001
+                log(f"screenshot {name} failed: {exc}")
+                (shots / f"{name}.png").write_bytes(b"")
+            taken.append(name)
+        if time.time() - started > 2700:
+            proc.kill()
+            raise SystemExit("GUI smoke timed out")
+        time.sleep(0.2)
+    log(f"window closed with exit code {proc.returncode} after {time.time() - started:.0f}s")
+    if not report.exists():
+        raise SystemExit("GUI smoke wrote no report")
     data = json.loads(report.read_text(encoding="utf-8"))
-    log(f"GUI report: {data}")
+    print(json.dumps(data, indent=1, ensure_ascii=False), flush=True)
+    problems = []
+    if data.get("error"):
+        problems.append(f"smoke script error: {data['error']}")
     if not data.get("dnd"):
-        raise SystemExit("drag-and-drop (tkdnd) did not load in the packaged exe")
-    if data.get("files") != len(genomes) or data.get("run_enabled") != "normal":
-        raise SystemExit("GUI did not accept the input files")
+        problems.append("drag-and-drop (tkdnd) did not load in the packaged exe")
+    if data.get("title") != f"{APP} {data.get('version')}":
+        problems.append(f"window title {data.get('title')!r}")
+    loaded = data.get("loaded", {})
+    names = [r["sample"] for r in loaded.get("rows", [])]
+    expected = [p.name.split(".")[0] for p in genomes]
+    if names != expected or loaded.get("run_enabled") != "normal":
+        problems.append(f"genomes not loaded: rows {names}, expected {expected}")
+    if data.get("settings_invalid", {}).get("accepted") is not False:
+        problems.append("the settings dialog accepted an invalid identity")
+    if data.get("settings_custom", {}).get("identity") != 90:
+        problems.append("the settings dialog did not apply identity 90")
+    if not data.get("settings_run", {}).get("automatic"):
+        problems.append("settings were not back to Automatic for the run")
+    fastq = data.get("fastq", {})
+    if not fastq.get("notice", "").startswith("6 FASTQ read files were not added") \
+            or fastq.get("files_after") != fastq.get("files_before"):
+        problems.append(f"FASTQ notice wrong: {fastq}")
+    finished = data.get("finished", {})
+    rows = {r["sample"]: r for r in finished.get("rows", [])}
+    for genome, expect in EXPECT.items():
+        row = rows.get(genome, {})
+        if row.get("status") != "Done" or row.get("species") != expect["species"] \
+                or not row.get("amr", "").isdigit():
+            problems.append(f"table row for {genome}: {row}")
+    if "st" in EXPECT["HS11286"] and not rows.get("HS11286", {}).get("mlst", "").startswith(
+            "ST" + EXPECT["HS11286"]["st"]):
+        problems.append(f"HS11286 MLST cell {rows.get('HS11286', {}).get('mlst')!r}")
+    if not finished.get("status", "").startswith("Finished: 2 of 2 genomes analysed"):
+        problems.append(f"status line {finished.get('status')!r}")
+    problems += assert_outputs(out)
+    cli_out = work / "smoke-results"
+    for genome in EXPECT:
+        if (cli_out / genome).exists() and (out / genome).exists():
+            same = _hit_keys(out / genome / f"{genome}.xlsx") == _hit_keys(
+                cli_out / genome / f"{genome}.xlsx")
+            log(f"{genome}: window run and --cli run give {'the same' if same else 'DIFFERENT'}"
+                " hits")
+            if not same:
+                problems.append(f"{genome}: window and --cli results differ")
+    screen = data.get("screen", {})
+    left, top, right, bottom = screen.get("work_area", [0, 0, 0, 0])
+    window = screen.get("window", [0, 0, 0, 0])
+    log(f"screen {screen.get('size')}, work area {screen.get('work_area')}, window {window}, "
+        f"log bottom {screen.get('log_bottom')}, scale {screen.get('scale')}")
+    if window[0] < left or window[1] < top or window[2] > right or window[3] > bottom \
+            or screen.get("log_bottom", 10 ** 6) > bottom:
+        problems.append("the window or its log does not fit on the screen")
+    wanted = ["1-empty", "2-genomes-loaded", "3-settings-open", "4-fastq-notice", "5-running",
+              "6-finished"]
+    for name in wanted:
+        png = shots / f"{name}.png"
+        if not png.exists() or png.stat().st_size < 10_000:
+            problems.append(f"screenshot {name} missing")
+    for problem in problems:
+        log(f"PROBLEM: {problem}")
+    if problems:
+        raise SystemExit(f"{len(problems)} GUI smoke problem(s)")
+    log("GUI smoke passed: a run started from the window finished with results")
 
 
 def main(argv: list[str]) -> None:
@@ -364,7 +553,7 @@ def main(argv: list[str]) -> None:
         raise SystemExit(__doc__)
     step, args = argv[1], [Path(a) for a in argv[2:]]
     {"blast": cmd_blast, "build-db": cmd_build_db, "package": cmd_package,
-     "smoke": cmd_smoke, "gui-smoke": cmd_gui_smoke}[step](*args)
+     "smoke": cmd_smoke, "gui-smoke": cmd_gui_smoke, "display": cmd_display}[step](*args)
 
 
 if __name__ == "__main__":

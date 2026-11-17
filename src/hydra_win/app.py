@@ -1,4 +1,4 @@
-"""Program entry point for ``Hydra-win.exe`` and ``python -m hydra_win``."""
+"""Program entry point for ``HYDRA-Win.exe`` and ``python -m hydra_win``."""
 
 from __future__ import annotations
 
