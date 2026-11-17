@@ -51,13 +51,13 @@ C = {
 
 COLUMNS = (  # id, heading, width (in average characters), anchor, stretch
     ("sample", "Sample (output name)", 21, "w", False),
-    ("file", "File", 22, "w", True),
+    ("file", "File", 21, "w", True),
     ("size", "Size", 9, "e", False),
     ("status", "Status", 12, "w", False),
     ("species", "Species", 21, "w", True),
     ("mlst", "MLST", 16, "w", False),
-    ("amr", "AMR genes", 11, "center", False),
-    ("mutations", "Mutations", 11, "center", False),
+    ("amr", "AMR genes", 13, "center", False),
+    ("mutations", "Mutations", 12, "center", False),
 )
 
 
@@ -351,7 +351,7 @@ class App:
         gap = int(line * 0.7)
         self._build_header()
 
-        body = ttk.Frame(self.root, padding=(gap + 4, gap, gap + 4, int(gap * 0.6)))
+        body = ttk.Frame(self.root, padding=(gap + 4, gap, gap + 4, gap))
         body.pack(fill="both", expand=True)
         # Packed bottom-up so the genome table, packed last, is what shrinks
         # on a small screen; the log and the Run button always stay visible.
@@ -555,7 +555,7 @@ class App:
         box.pack(fill="x")
         inner = tk.Frame(box, bg=C["card"])
         inner.pack(fill="both", expand=True, padx=1, pady=1)
-        self.log = tk.Text(inner, height=4, state="disabled", wrap="word",
+        self.log = tk.Text(inner, height=5, state="disabled", wrap="word",
                            font=self.fonts["mono"], bg=C["card"], fg="#334155", relief="flat",
                            bd=0, highlightthickness=0, padx=8, pady=4)
         scroll = ttk.Scrollbar(inner, orient="vertical", command=self.log.yview)
@@ -805,9 +805,10 @@ class App:
         if not missing:
             self.db_label.configure(text=f"Databases ready ({len(databases.ALL)})")
             return
-        self.db_label.configure(text=f"Downloading {len(missing)} database(s)…")
-        self.append_log("First launch: downloading the databases that cannot be shipped in "
-                        f"the zip ({', '.join(missing)}). This happens once and can take "
+        self.db_label.configure(text=f"Getting {len(missing)} database(s)…")
+        self.append_log("First launch: getting the databases that cannot be shipped in the "
+                        f"zip ({', '.join(missing)}), from an earlier installation if there is "
+                        "one, otherwise by downloading them. This happens once and can take "
                         "several minutes.")
         self._start(self._download_worker)
 

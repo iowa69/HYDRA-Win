@@ -79,3 +79,11 @@ def test_settings_dialog_validates_and_applies(app):
     dialog.ok()
     assert app.settings == core.Settings()
     assert app.settings_summary.cget("text").startswith("Thresholds: Automatic")
+
+
+def test_about_window(app):
+    app.show_about()
+    texts = [w.cget("text") for w in app.about_window.winfo_children() if isinstance(w, tk.Label)]
+    assert "HYDRA-Win" in texts and "Giovanni Lorenzin · IOWA-BioTech" in texts
+    assert any("github.com/iowa69/HYDRA-Win" in t for t in texts)
+    app.about_window.destroy()
