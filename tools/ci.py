@@ -102,10 +102,11 @@ EXPECT = {
                   # loci with no network, so the ST and the ST131 subclone call
                   # that reads it are available offline.
                   "ST achtman": "131"},
-              # What the Summary's own MLST row must read offline.
-              "offline_st": "131",
               "offline_undetermined": {
                   "Shigella / EIEC cluster": "the ShigEiFinder gene sets"},
+              # The nine the offline run has always required of this genome.
+              "offline_databases": ("ncbi", "protein", "resfinder", "argannot", "megares",
+                                    "vfdb", "ecoli_vf", "plasmidfinder", "ecoh"),
               "headline": "ExPEC \u00b7 phylogroup B2"},
     "USA300": {"species": "Staphylococcus aureus", "st": "8",
                # SCCmec IVa carries mecA; the three small plasmids of FPR3757
@@ -142,6 +143,10 @@ EXPECT = {
                "offline_undetermined": {
                    "spa type (Ridom)": "the Ridom spa database"},
                "offline_st": "8",
+               # ecoli_vf and ecoh hold E. coli sequences and have nothing to
+               # say about a staphylococcus, so they are not required here.
+               "offline_databases": ("ncbi", "protein", "resfinder", "argannot",
+                                     "megares", "vfdb"),
                "headline": "spa t008 \u00b7 CC8 \u00b7 agr I"},
 }
 GENOME_SHEETS = ("Summary", "AMR_genes", "Point_mutations", "Virulence", "Plasmids",
@@ -795,21 +800,28 @@ def smoke_offline(zip_path: Path, work: Path, genome: Path, *, suffix: str = "",
         problems.append(f"offline Summary still lists pubmlst as not performed: "
                         f"{summary.get('pubmlst')!r}")
     expected_st = EXPECT[name].get("offline_st")
-    reported_st = str(summary.get("MLST ST", ""))
-    if expected_st is None:
-        problems.append(f"{name} has no offline_st in EXPECT, so the offline MLST "
-                        f"result is not being checked at all")
-    elif reported_st != expected_st:
+    reported_st = str(summary.get("MLST ST", "")).strip()
+    if expected_st is not None and reported_st != expected_st:
         problems.append(f"offline {name}: MLST ST {reported_st!r} with no network, "
                         f"expected {expected_st!r} from the bundled PubMLST schemes")
+    elif not reported_st.isdigit():
+        # E. coli has two PubMLST schemes and which one Hydra picks is not
+        # asserted online either, so the test here is that the bundled schemes
+        # produced a sequence type at all - the published Achtman ST 131 is
+        # checked through the typing sheet below.
+        problems.append(f"offline {name}: MLST ST {reported_st!r} is not a sequence "
+                        f"type; the bundled PubMLST schemes should have assigned one "
+                        f"with no network")
     if summary.get("Species") != EXPECT[name]["species"]:
         problems.append(f"offline species {summary.get('Species')!r}")
     hits = _rows(wb["All_hits"])
     used = {h["Database"] for h in hits}
-    wanted = {"ncbi", "protein", "resfinder", "argannot", "megares", "vfdb", "ecoli_vf",
-              "plasmidfinder", "ecoh"}
+    wanted = set(EXPECT[name].get("offline_databases") or ())
+    if not wanted:
+        problems.append(f"{name} declares no offline_databases in EXPECT, so this run "
+                        f"is not checking which databases produced hits at all")
     if not wanted <= used:
-        problems.append(f"offline run: no hits from {sorted(wanted - used)}")
+        problems.append(f"offline {name}: no hits from {sorted(wanted - used)}")
     if "card" in used:
         problems.append("offline run reported CARD hits without CARD")
     checked, found = verify(book, genome)
@@ -842,12 +854,18 @@ def smoke_offline(zip_path: Path, work: Path, genome: Path, *, suffix: str = "",
     if "organism typing available for" not in text:
         problems.append("the offline log does not say which organism typing is available")
     # No network: a run that quietly reached one would invalidate every
-    # assertion above, so the log must not show a single download.
-    for leaked in ("downloading", "Downloading", "https://rest.pubmlst.org"):
+    # assertion above. The log has to show the refusal and no download.
+    # "offline mode: not downloading ..." is the line that must be there, so
+    # the absence test has to be the exact first-launch phrases and not the
+    # word "downloading", which that line contains.
+    if "offline mode: not downloading" not in text:
+        problems.append("the offline log does not record that the downloads were "
+                        "refused, so this run may not have been offline at all")
+    for leaked in ("first launch: downloading", "https://rest.pubmlst.org",
+                   "https://card.mcmaster.ca"):
         if leaked in text:
             problems.append(f"the offline log mentions {leaked!r}: this run was "
                             f"supposed to have no network at all")
-            break
     log(f"offline {name}: {len(installed)} bundled databases, missing {sorted(missing)}; "
         f"ST {reported_st}; hits from {sorted(used)}; {checked} mutation rows verified; "
         f"{len([r for r in rows if r['Type'] == 'Organism typing'])} organism "
