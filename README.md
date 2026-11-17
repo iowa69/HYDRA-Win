@@ -542,7 +542,9 @@ submission date, and one sentence decides this:
 > citation and acknowledgement.
 
 The same terms say that *"Anonymous (non-logged in) users may view only pre 2025
-data"*, and the unauthenticated API says so on every response it sends. So the
+data"*, and the unauthenticated API repeats it in the responses it sends: *"you are
+currently restricted to accessing data that was submitted on or prior to
+2024-12-31"*. So the
 snapshot is fetched **anonymously, with no API key and no other credential**, and it
 therefore contains only data the sentence above covers. That is not taken on trust:
 the release workflow asks PubMLST's own API whether this client can reach anything
