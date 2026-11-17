@@ -19,7 +19,9 @@ from openpyxl import load_workbook
 GENOME_SHEETS = ("Summary", "AMR_genes", "Point_mutations", "Virulence", "Plasmids",
                  "Typing", "All_hits", "Pivot")
 CUMULATIVE_SHEETS = ("Summary", "AMR_matrix", "Mutations_matrix", "Virulence_matrix",
-                     "Plasmids_matrix", "All_hits")
+                     "Plasmids_matrix", "Typing_matrix", "All_hits")
+#: Where the Typing sheet's header row sits (title and explanation above it).
+TYPING_HEADER_ROW = 4
 
 
 def rows(ws, header_row=1):
@@ -66,9 +68,11 @@ def main(argv):
         for label, expected in checks.items():
             if str(summary.get(label)) != str(expected):
                 problems.append(f"{name}: {label} {summary.get(label)!r} != upstream {expected!r}")
-        typing = {r["Scheme / database"]: r["Call"] for r in rows(wb["Typing"])}
+        # The Typing sheet has a title and an explanation above its header row.
+        typing = {r["Scheme / database"]: r["Call"]
+                  for r in rows(wb["Typing"], header_row=TYPING_HEADER_ROW)}
         for t in sample["typing"]:
-            label = t["scheme"].replace("__", " ").replace("_", " ")
+            label = t.get("title") or t["scheme"].replace("__", " ").replace("_", " ")
             if str(typing.get(label)) != str(t["call"]):
                 problems.append(f"{name}: typing {label} {typing.get(label)!r} != {t['call']!r}")
         point = rows(wb["Point_mutations"])
