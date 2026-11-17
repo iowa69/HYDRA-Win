@@ -1102,13 +1102,14 @@ class DatabasesDialog:
             anchor="w")
         tk.Label(body, font=f["small"], bg=C["card"], fg=C["muted"], justify="left",
                  wraplength=int(760 * s),
-                 text="Twelve gene databases and the organism typing data for seven of the "
-                      "eight organisms ship inside the zip. What a licence does not let the "
-                      "zip carry - PubMLST, CARD, the Ridom spa database, hicap's cap "
-                      "database, ShigEiFinder and the N. meningitidis data - is downloaded "
-                      "on this PC the first time HYDRA-Win starts. If that fails (proxy, "
-                      "firewall), Retry, or copy the 'db' folder from a PC where it worked "
-                      "and use Import from folder."
+                 text="Thirteen gene and typing databases, including the PubMLST MLST "
+                      "schemes, and the organism typing data for all eight organisms ship "
+                      "inside the zip, so MLST and everything derived from a sequence type "
+                      "work with no internet. What a licence does not let the zip carry - "
+                      "CARD, the Ridom spa database, hicap's cap database and "
+                      "ShigEiFinder - is downloaded on this PC the first time HYDRA-Win "
+                      "starts. If that fails (proxy, firewall), Retry, or copy the 'db' "
+                      "folder from a PC where it worked and use Import from folder."
                  ).pack(anchor="w", pady=(2, int(10 * s)))
         frame = tk.Frame(body, bg=C["border"])
         frame.pack(fill="both", expand=True)

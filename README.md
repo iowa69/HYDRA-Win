@@ -125,10 +125,11 @@ glance.
    (not *Program Files*).
 3. Double-click `HYDRA-Win.exe`.
 
-Twelve of the fourteen gene databases, and the organism typing data for seven of the
-eight organisms, are in the zip. The first time it starts, HYDRA-Win downloads what it
-isn't allowed to redistribute: PubMLST (for MLST), CARD, the Ridom *spa* database,
-hicap's *cap* database, ShigEiFinder and the *N. meningitidis* typing data (see
+Thirteen of the fourteen gene and typing databases, and the organism typing data for
+all eight organisms, are in the zip — including the PubMLST MLST schemes, so **MLST and
+everything derived from a sequence type work with no internet at all**. The first time
+it starts, HYDRA-Win downloads only what it isn't allowed to redistribute: CARD, the
+Ridom *spa* database, hicap's *cap* database and ShigEiFinder's gene sets (see
 [Databases](#databases)). This needs an internet connection and takes a few minutes. It
 only happens once. Everything else works without them, and every workbook says what
 was not done (see [When a download fails](#when-a-download-fails)).
@@ -233,14 +234,14 @@ If this PC still cannot reach the servers:
 2. On this PC, open **Databases…** → **Import from folder…** and choose that folder
    (or the whole HYDRA-Win folder), or run `HYDRA-Win.exe --import-db E:\db`.
 
-Importing a folder installs the organism typing data too, not only PubMLST and CARD.
+Importing a folder installs the organism typing data too, not only CARD.
 
-Without them, analyses still run with the twelve bundled databases and the bundled
-organism typing data. The window, the log and every `Summary` sheet state what was not
-done, for example *NO MLST: the PubMLST schemes are not installed, so no sequence type
-was determined; an empty ST is not a negative result*, the MLST cell reads *not typed*
-rather than staying empty, and an organism call whose database is missing reads *not
-determined* with the reason on the same row of the `Typing` sheet.
+Without them, analyses still run with the thirteen bundled databases and the bundled
+organism typing data — which now includes MLST, so a sequence type is assigned either
+way. The window, the log and every `Summary` sheet state what was not done, for example
+*CARD not screened: genes only CARD lists were not looked for*, and an organism call
+whose database is missing reads *not determined* with the reason on the same row of the
+`Typing` sheet rather than staying empty.
 
 ### Upgrading
 
@@ -311,10 +312,25 @@ resolved*, then the raw hit columns.
   frameshift (the net indel, where the new frame stops, the HGVS `fsTer`, and the
   deleted or inserted base when only one change restores the protein, marked
   *inferred*), interruption by inserted sequence (its size; the element itself is not
-  identified), start codon lost, or 5' part absent. A gene that simply runs off the end
-  of a contig is labelled **Gene cut by a contig end (NOT evidence of disruption)**,
-  which AMRFinderPlus reports as `PARTIAL_CONTIG_END`. AMRFinderPlus counts the novel
+  identified), start codon lost, or 5' part absent. AMRFinderPlus counts the novel
   residues before the stop (`fsTer11`); HGVS counts the stop as well (`fsTer12`).
+* **A gene cut by a contig edge is reported, and the row says so.** The call is never
+  suppressed — a gene running off the end of a contig is a real finding, and hiding it
+  would hide the gene behind an assembly artefact. But it is not a confirmed loss of
+  function, and no part of the row lets it pass for one:
+
+  | Where | What it says |
+  | --- | --- |
+  | *Type of call* | **Gene cut by a contig end: NOT evidence of disruption, loss of function not assessed** |
+  | *Element subtype* | `DISRUPTION_AT_CONTIG_END` |
+  | *Resolution* | `CONTIG_END` |
+  | *Note* | leads with "runs off the end of contig …, so the gene is cut by the assembly: this is NOT evidence of disruption and loss of function could not be assessed. Reported rather than suppressed, but it is not a confirmed loss-of-function call" |
+  | *Resistance it is associated with* | "loss of function not established: the gene is cut by a contig end" — and what a confirmed one *would* have meant |
+  | matrix and pivot cells | `cut by contig end - not assessed`, struck through and greyed |
+
+  The resistance score ignores such a row too: the row is reported in full, but a
+  lesion that could not be assessed is not counted as resistance that is present.
+  AMRFinderPlus reports the same situation as `PARTIAL_CONTIG_END`.
 * **Kleborate's name** is given for the *K. pneumoniae* loci Kleborate types (GyrA,
   ParC, OmpK35, OmpK36, MgrB, PmrB).
 * Anything that cannot be resolved to a codon (a position in an alignment gap, a codon
@@ -329,12 +345,12 @@ call.
 
 | Organism | What is typed | Works with no internet |
 | --- | --- | --- |
-| *Staphylococcus aureus* | spa type (Ridom), *agr* group, MLST clonal complex, SCCmec, Panton-Valentine leucocidin, *tst*, enterotoxin and haemolysin repertoires, *hlb* status (and the Sa3int prophage that interrupts it), capsule serotype locus, immune evasion cluster type, ACME, *blaZ* operon | everything **except the spa type**, which needs the Ridom download, **and the clonal complex**, which is derived from the sequence type and so needs PubMLST |
+| *Staphylococcus aureus* | spa type (Ridom), *agr* group, MLST clonal complex, SCCmec, Panton-Valentine leucocidin, *tst*, enterotoxin and haemolysin repertoires, *hlb* status (and the Sa3int prophage that interrupts it), capsule serotype locus, immune evasion cluster type, ACME, *blaZ* operon | everything **except the spa type**, which needs the Ridom download |
 | *Streptococcus pyogenes* | emm type and emm cluster with its tissue tropism, virulence and superantigen repertoire, prophage content, regulatory loci, adhesins | everything |
 | *Streptococcus agalactiae* | capsular serotype, alpha-like protein (Alp) type, surface proteins, pilus island type, marker genes, PBP2X substitutions | everything |
 | *Streptococcus pneumoniae* | capsular serotype, PBP type (1A:2B:2X) with the CDC reference MIC where that triplet is in the reference table, macrolide/lincosamide/tetracycline/fluoroquinolone determinants, pilus islets | everything |
-| *Haemophilus influenzae* | capsule type (*cap* locus), PBP3 (*ftsI*) substitution pattern and rPBP3 group, β-lactam interpretation, MLST | the **PBP3 pattern and the β-lactam interpretation**; the capsule type and the ST need the first-launch download |
-| *Neisseria meningitidis* | capsule serogroup, fine type, Bexsero antigen sequence type (BAST), MLST and clonal complex, resistance target alleles | **nothing**: all of its data is PubMLST nomenclature and is downloaded on first launch |
+| *Haemophilus influenzae* | capsule type (*cap* locus), PBP3 (*ftsI*) substitution pattern and rPBP3 group, β-lactam interpretation, MLST | everything **except the capsule type**, which needs the first-launch download of hicap's GPL-3.0 *cap* database |
+| *Neisseria meningitidis* | capsule serogroup (with the lesion, where the locus carries one), fine type, Bexsero antigen sequence type (BAST) and MenDeVAR index, MLST and clonal complex, resistance target alleles | **everything**: all of its data is PubMLST nomenclature, and the pre-2025 snapshot is now in the zip |
 | *Salmonella enterica* | serovar from the antigenic formula, subspecies, H2 (*fljB*) locus, pathogenicity islands, virulence plasmid, typhoidal markers, ST and eBurst group | everything |
 | *Escherichia coli* and *Shigella* | phylogroup (Clermont), *fimH* allele, ST131 subclone, Shiga toxin subtype, pathotype, intimin (*eae*) subtype, ExPEC/UPEC virulence panel | everything **except the *Shigella*/EIEC cluster call** |
 
@@ -357,6 +373,19 @@ and in the cumulative `Summary` and `Typing_matrix` sheets.
   database that is not installed, a locus that reaches a contig end, a profile that is
   incomplete, an allele newer than the data. Undetermined calls are coloured in the
   `Typing` sheet so they cannot be skimmed past.
+* **A capsule call states the type first and the lesion with it.** A meningococcus that
+  carries a serogroup B locus it cannot express reads `B (capsule gene disrupted)`, not
+  a bare `NG` with the genogroup hidden in another column — the laboratory's
+  non-groupable result and the genome's genogroup are both true and belong together, and
+  these lesions revert. The gene-by-gene evidence and the caveat are in the same row:
+  which gene, what is wrong with it, that the laboratory will report non-groupable, and
+  that an insertion-sequence or slipped-strand switch can turn the capsule back on. A
+  capsule gene cut by a contig end is a third, distinct wording —
+  `B (capsule gene at a contig end, expression not assessed)` — because an assembly
+  boundary is neither an intact capsule nor a lesion. The same shape is used for
+  *H. influenzae*: a single-copy *cap* locus with *bexA* truncated reads
+  `b (capsule gene disrupted)`, while the normal virulent Hib arrangement (a duplicated
+  locus with one *bexA* truncated) stays plain `b`.
 * **Everything is read from the assembly.** A scheme that needs reads is not attempted.
   Repeat arrays (*spa*) and long loci (*cap*, *cps*, SCCmec) can be collapsed or split
   by a short-read assembler, which the caveats say for each affected call.
@@ -366,8 +395,16 @@ and in the cumulative `Summary` and `Typing_matrix` sheets.
   (H30) is only meaningful if the Achtman ST is 131, which the row states.
 * **PubMLST data is fetched anonymously and no API key is ever used.** Anonymous access
   returns only data submitted on or before 31 December 2024, which PubMLST's terms allow
-  to be redistributed. A sequence type assigned after that date therefore reads *not
-  determined*, with that reason, instead of being guessed.
+  to be redistributed — which is what lets the snapshot ship in the zip and MLST work
+  offline. A sequence type assigned after that date therefore reads *not determined*,
+  with that reason, instead of being guessed. See
+  [PubMLST: why the MLST schemes are now in the zip](#pubmlst-why-the-mlst-schemes-are-now-in-the-zip).
+* **Serogroups W and Y are told apart on the sequence, not on a threshold.** They differ
+  by one gene and those two genes (*csw*, *csy*) are 99% identical, so both clear any
+  identity cut-off a protein search can set. The call goes to whichever serogroup's own
+  gene the isolate matches better, the two scores are in the row's evidence, and when
+  they are too close to separate the row says so and asks for serology or a
+  serogroup-specific PCR.
 * **No MIC is predicted unless a reference laboratory published the value.** The
   pneumococcal PBP type gives the CDC reference MIC only for a 1A:2B:2X triplet that is
   in the CDC table, and declines otherwise. The nearest-neighbour mode-MIC model was
@@ -401,7 +438,7 @@ contains:
 ## What is (and isn't) included
 
 HYDRA-Win runs upstream Hydra's own analysis code. It uses a pinned copy of
-`hydra_amr` from [iowa69/hydra](https://github.com/iowa69/hydra) at commit `0bad0b0`
+`hydra_amr` from [iowa69/hydra](https://github.com/iowa69/hydra) at commit `38a3f46`
 (branch `typing-integration`, open as pull requests #2 and #3), with two small,
 documented Windows patches (see `src/hydra_amr/VENDORED.txt`). With Automatic settings,
 the calls match upstream's `--preset deep`:
@@ -456,10 +493,10 @@ Two pieces are added for Windows:
 ## Databases
 
 The release workflow builds the databases from their upstream sources with upstream
-Hydra's own fetchers, on the date recorded in `db\DATABASES.txt`. Twelve of the gene
-databases ship inside the zip; the two whose terms restrict redistribution are
-downloaded on your PC. The organism typing data follows the same rule and is listed
-in [Organism typing data](#organism-typing-data) below.
+Hydra's own fetchers, on the date recorded in `db\DATABASES.txt`. Thirteen of them
+ship inside the zip; the one whose terms restrict redistribution (CARD) is downloaded
+on your PC. The organism typing data follows the same rule and is listed in
+[Organism typing data](#organism-typing-data) below.
 
 | Database | How you get it | Licence / terms | Citation |
 | --- | --- | --- | --- |
@@ -473,19 +510,64 @@ in [Organism typing data](#organism-typing-data) below.
 | MEGARes | in the zip, from abricate's repository (pinned commit) | The source states no licence | Bonin et al. 2023, Nucleic Acids Res 51:D744 |
 | *E. coli* VF | in the zip, from abricate's repository (pinned commit) | The source states no licence | [phac-nml/ecoli_vf](https://github.com/phac-nml/ecoli_vf) |
 | EcOH | in the zip, from abricate's repository (pinned commit) | The source states no licence | Ingle et al. 2016, Microb Genom 2:e000064 |
-| PubMLST 7-locus schemes | downloaded on first launch | PubMLST terms: data downloaded since 2025 may not be redistributed or repackaged | Jolley, Bray & Maiden 2018, Wellcome Open Res 3:124 |
+| PubMLST 7-locus schemes (pre-2025 snapshot) | in the zip | PubMLST terms: *"All data submitted on or before 31 December 2024 may continue to be downloaded, used, and redistributed without restriction, subject only to proper scientific citation and acknowledgement."* Fetched anonymously, so that is all it contains — see below | Jolley, Bray & Maiden 2018, Wellcome Open Res 3:124 |
 | CARD | downloaded on first launch | CARD terms: no redistribution without McMaster University's written consent; free for academic/non-commercial use | Alcock et al. 2023, Nucleic Acids Res 51:D690 |
 
 Which databases ship in the zip follows the project owner's policy: a database whose
 source states no licence or terms is shipped inside the zip; a database whose source
-expressly states terms that restrict redistribution (CARD, PubMLST) is downloaded on
-your PC the first time HYDRA-Win runs. VFDB, ARG-ANNOT, MEGARes, *E. coli* VF and EcOH
-state no licence at all, so they are shipped. That is the owner's decision for this
-project, not a licence granted by those sources: their sources, the copy used, the date
-it was retrieved and the citation are in `db\DATABASES.txt`. If you hold rights in one
-of them and want it removed from the zip, please
+expressly states terms that restrict redistribution (CARD) is downloaded on your PC
+the first time HYDRA-Win runs. VFDB, ARG-ANNOT, MEGARes, *E. coli* VF and EcOH state
+no licence at all, so they are shipped. That is the owner's decision for this project,
+not a licence granted by those sources: their sources, the copy used, the date it was
+retrieved and the citation are in `db\DATABASES.txt`. If you hold rights in one of
+them and want it removed from the zip, please
 [open an issue](https://github.com/iowa69/HYDRA-Win/issues) and it will go back to
 being a first-launch download.
+
+#### PubMLST: why the MLST schemes are now in the zip
+
+MLST, and everything derived from a sequence type, used to need the first-launch
+download. The schemes now ship, so **MLST works with no network at all** — and with
+them the calls that read a sequence type: the *S. aureus* clonal complex, the
+*Salmonella* eBurst group, the meningococcal clonal complex and fine type, the
+*H. influenzae* sequence type. The Windows release test proves this on a fresh unzip
+with no network: an isolate gets its ST, and `CC8` is derived from it.
+
+PubMLST publishes no open licence. Its
+[Terms and Conditions](https://pubmlst.org/terms-conditions) split the data by
+submission date, and one sentence decides this:
+
+> All data submitted on or before 31 December 2024 may continue to be downloaded,
+> used, and redistributed without restriction, subject only to proper scientific
+> citation and acknowledgement.
+
+The same terms say that *"Anonymous (non-logged in) users may view only pre 2025
+data"*, and the unauthenticated API says so on every response it sends. So the
+snapshot is fetched **anonymously, with no API key and no other credential**, and it
+therefore contains only data the sentence above covers. That is not taken on trust:
+the release workflow asks PubMLST's own API whether this client can reach anything
+submitted on or after 1 January 2025 (it returns zero records), and checks the allele
+identifiers in the bundled files against the index an anonymous client is served. Both
+checks must pass or the build fails, and the result is written into
+`db\mlst\pubmlst\PUBMLST.txt` with the retrieval date.
+
+Data submitted from 1 January 2025 onwards is *not* in the zip and is not reachable
+by HYDRA-Win. An allele defined after that date reads "not determined", with that
+reason given, rather than being guessed.
+
+**If you use this data, cite and acknowledge PubMLST.** Cite Jolley KA, Bray JE,
+Maiden MCJ. *Open-access bacterial population genomics: BIGSdb software, the
+PubMLST.org website and their applications.* Wellcome Open Res 2018;3:124. And
+include the acknowledgement PubMLST asks for:
+
+> This publication made use of the PubMLST website (https://pubmlst.org/) sited at
+> the University of Oxford. The development of that website was funded by the
+> Wellcome Trust.
+
+The allele sets are in the zip **once**. Four organism typing modules want a sequence
+type and all four read Hydra's own MLST call, so their own copies of the same schemes
+are not shipped; only their profile tables travel with them, because those carry the
+clonal complex and the eBurst group that a scheme-agnostic MLST call does not.
 
 ### Organism typing data
 
@@ -502,16 +584,20 @@ from the source's own words.
 | Pneumococcal *cps* references and the CDC serotype, PBP and resistance probe sets with the reference PBP-type MIC table | in the zip | **the sources state no licence** | Bentley et al. 2006, PLoS Genet 2:e31; Metcalf et al. 2016, Clin Microbiol Infect 22:1002 |
 | *H. influenzae* PBP3 (*ftsI*) reference and the *blaTEM*/*blaROB* references | in the zip | NCBI: no licence attached | Skaare et al. 2014, Clin Microbiol Infect 20:O501 |
 | hicap *cap* database | downloaded on first launch | **GPL-3.0**: redistributable, but only under the GPL, so it is not mixed into this MIT zip | Watts & Holt 2019, J Clin Microbiol 57:e00190-19 |
-| *H. influenzae* and *N. meningitidis* PubMLST data (capsule, antigen peptides, MLST, resistance alleles) | downloaded on first launch | PubMLST terms restrict redistribution of data submitted after 2024-12-31 | Jolley, Bray & Maiden 2018, Wellcome Open Res 3:124 |
+| *H. influenzae* and *N. meningitidis* PubMLST data (capsule loci, PorA/FetA and vaccine-antigen peptides, BAST, MLST, resistance alleles) | in the zip | PubMLST: the pre-2025 snapshot an anonymous download returns, redistribution unrestricted with citation and acknowledgement — see [above](#pubmlst-why-the-mlst-schemes-are-now-in-the-zip) | Jolley, Bray & Maiden 2018, Wellcome Open Res 3:124; Harrison et al. 2013, Emerg Infect Dis 19:566 |
 | SISTR antigen alleles, the Grimont & Weill serovar table, the SPI references, *Salmonella* marker genes and the PubMLST *Salmonella* scheme | in the zip | Apache-2.0 (SISTR). NCBI: no copyright claimed. PubMLST: pre-2025 data, redistribution unrestricted | Yoshida et al. 2016, PLoS One 11:e0147101; Grimont & Weill 2007, WHO Collaborating Centre, Institut Pasteur |
 | FimTyper *fimH* alleles, NCBI StxTyper references, VirulenceFinder *E. coli* panel | in the zip | FimTyper and VirulenceFinder: **the sources state no licence**. StxTyper: US government work, public domain | Roer et al. 2017, J Clin Microbiol 55:2538; Malberg Tetzschner et al. 2020, J Clin Microbiol 58:e01269-20 |
 | ShigEiFinder cluster-specific genes | downloaded on first launch | **GPL-3.0**: redistributable, but only under the GPL, so it is not mixed into this MIT zip | Zhang et al. 2021, Microb Genom 7:000704 |
 
-Two of these are downloaded although their licence would permit redistribution:
-hicap's *cap* database and ShigEiFinder's gene sets are GPL-3.0, which is copyleft,
-and this zip is MIT. Downloading them on your own PC keeps the question from arising.
+Only three sets are still downloaded on your PC. Two of them are downloaded although
+their licence would permit redistribution: hicap's *cap* database and ShigEiFinder's
+gene sets are GPL-3.0, which is copyleft, and this zip is MIT, so downloading them on
+your own PC keeps the question from arising. The third, the Ridom *spa* database, is
+expressly limited to non-commercial use by people who download it themselves.
+Everything else — including all the meningococcal data, which is PubMLST
+nomenclature throughout — is in the zip.
 
-The organism typing data is about 33 MB before compression, and the release workflow prints the figure it actually built. `db\DATABASES.txt` lists, for
+The organism typing data is about 42 MB before compression, and the release workflow prints the figure it actually built. `db\DATABASES.txt` lists, for
 every one of these, the exact source URL, the version or retrieval date, the licence in
 the source's own words, the redistribution status the source states, and the citation.
 If you hold rights in any of them and want it removed from the zip, please
@@ -522,7 +608,9 @@ The `db` folder in the zip contains `DATABASES.txt` and the licence texts.
 
 If a first-launch download fails, the analysis still runs with the other databases,
 and says what was not done (see [When a download fails](#when-a-download-fails)).
-Commercial users must check the CARD and PubMLST terms themselves.
+Commercial users must check the CARD terms themselves, and note that PubMLST requires
+a separate licence for any data submitted from 2025 onwards — none of which is in this
+zip or reachable from it.
 
 NCBI BLAST+ 2.16.0 is in the zip under `blast\`. It's public domain; see
 `blast\LICENSE`. It comes with the Microsoft Visual C++ runtime DLLs it needs, which
@@ -548,12 +636,25 @@ through these steps:
    The organism typing is asserted against the published types of those strains
    (USA300: spa `t008`, CC8, *agr* I, PVL positive, capsule serotype 5, immune evasion
    cluster type B; EC958: phylogroup B2, `fimH30`, ExPEC, no Shiga toxin), and every
-   organism row must carry an organism, evidence and caveat text. Then a `--cli` run
-   with custom thresholds and a folder of FASTQ files among the inputs, and a fresh
-   unzip run `--offline` on the *S. aureus* genome: the twelve bundled databases and the
-   bundled organism typing data must produce real calls, the files a licence withholds
-   must be absent from the zip, and PubMLST, CARD and the spa type must be reported as
-   missing with the reason, never as empty results
+   organism row must carry an organism, evidence and caveat text, and the two calls the
+   reference tools make — HS11286's `pmrB_A21DfsTer16` (Kleborate's `pmrB:p.Gly20fs`)
+   and EC958's `acrR_F180LfsTer3` — must be among them. Then a `--cli` run with custom
+   thresholds and a folder of FASTQ files among the inputs, and **two** fresh unzips run
+   `--offline`, each with its own database home and no network:
+   * the *E. coli* genome: the thirteen bundled databases and the bundled organism
+     typing data must produce real calls, including a sequence type and the ST131
+     subclone call that reads it, while the *Shigella*/EIEC call (ShigEiFinder,
+     GPL-3.0) must read *not determined* with its reason;
+   * the *S. aureus* genome: its MLST clonal complex is **derived** from the sequence
+     type, so `CC8` with no network is the proof that the bundled PubMLST schemes
+     really do type an isolate — while its spa type (Ridom) must still read *not
+     determined*.
+
+   Both runs also check that the PubMLST snapshot in the zip holds every scheme an
+   organism module needs, that its provenance file records a successful pre-2025
+   verification, that nothing credential-shaped is in the database tree, that no
+   module ships a second copy of a bundled allele set, and that the log shows the
+   downloads being refused and not a single one happening
 7. Window test on a 1366×768 screen: the packaged app is driven through its widgets
    (add genomes, settings, a FASTQ drop, **Run analysis**) until the table shows the
    results, then opens **Databases…**. The test checks the table, the workbooks (the same

@@ -10,7 +10,7 @@ REPO_URL = "https://github.com/iowa69/HYDRA-Win"
 
 #: The upstream Hydra commit vendored under src/hydra_amr (see VENDORED.txt there).
 UPSTREAM_URL = "https://github.com/iowa69/hydra"
-UPSTREAM_COMMIT = "c020035fbd2c3850bb0684f8ab33c9bbaf52c4f5"
+UPSTREAM_COMMIT = "38a3f4618eb71117937d2c90d6cf715cf9f3cf21"
 
 __all__ = ["__version__", "APP_NAME", "AUTHOR", "ORGANISATION", "REPO_URL", "UPSTREAM_URL",
            "UPSTREAM_COMMIT"]
