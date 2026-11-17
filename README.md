@@ -569,6 +569,13 @@ python -m pytest -q
 `hydra run --preset deep --format json` on the same genomes and databases. For custom
 thresholds, give both the same `--min-identity` / `--min-coverage`.
 
+## Credit and licence
+
+HYDRA-Win is by Giovanni Lorenzin · IOWA-BioTech and is MIT-licensed (see `LICENSE`).
+The logo is upstream Hydra's. The analysis is upstream
+[Hydra](https://github.com/iowa69/hydra), also MIT; its licence is kept in
+`src/hydra_amr/LICENSE`. Please cite Hydra and the databases you rely on.
+
 ## What this software can achieve
 
 From a folder of draft assemblies and nothing else — no Linux, no conda, no internet
@@ -618,10 +625,3 @@ What it is not: it is not a replacement for phenotypic susceptibility testing, i
 not predict MICs except where a reference laboratory published the value for that exact
 genotype, and it does not read raw reads. It tells you what is in the genome, with the
 evidence; the interpretation stays with the microbiologist.
-
-## Credit and licence
-
-HYDRA-Win is by Giovanni Lorenzin · IOWA-BioTech and is MIT-licensed (see `LICENSE`).
-The logo is upstream Hydra's. The analysis is upstream
-[Hydra](https://github.com/iowa69/hydra), also MIT; its licence is kept in
-`src/hydra_amr/LICENSE`. Please cite Hydra and the databases you rely on.
