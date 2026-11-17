@@ -124,8 +124,10 @@ glance.
    (not *Program Files*).
 3. Double-click `HYDRA-Win.exe`.
 
-Twelve of the fourteen databases are in the zip. The first time it starts, HYDRA-Win
-downloads the two it isn't allowed to redistribute, PubMLST (for MLST) and CARD (see
+Twelve of the fourteen gene databases, and the organism typing data for seven of the
+eight organisms, are in the zip. The first time it starts, HYDRA-Win downloads what it
+isn't allowed to redistribute: PubMLST (for MLST), CARD, the Ridom *spa* database,
+hicap's *cap* database, ShigEiFinder and the *N. meningitidis* typing data (see
 [Databases](#databases)). This needs an internet connection and takes a few minutes. It
 only happens once. Everything else works without them, and every workbook says what
 was not done (see [When a download fails](#when-a-download-fails)).
@@ -200,7 +202,7 @@ This runs the same code path as the window. Other options:
 | `--log FILE` | Also write the log to `FILE` |
 | `--db-status` | Report which databases are installed, and why a missing one failed |
 | `--fetch-db` | Download the first-launch databases, then exit |
-| `--import-db FOLDER` | Install PubMLST and CARD from a folder copied from another PC, then exit |
+| `--import-db FOLDER` | Install the first-launch databases, organism typing data included, from a folder copied from another PC, then exit |
 | `--version` | Print the version |
 
 FASTQ inputs are skipped with one warning. The exit code is non-zero if any genome
@@ -242,9 +244,8 @@ determined* with the reason on the same row of the `Typing` sheet.
 ### Upgrading
 
 Unzip the new version into its own folder. Databases an earlier version downloaded
-into `%LOCALAPPDATA%\Hydra-win` are reused; otherwise PubMLST and CARD are downloaded
-again on the first launch, or can be imported from the old folder with
-**Import from folder…**.
+into `%LOCALAPPDATA%\Hydra-win` are reused; otherwise the first-launch downloads run
+again, or can be imported from the old folder with **Import from folder…**.
 
 ## Output
 
@@ -449,8 +450,10 @@ Two pieces are added for Windows:
 ## Databases
 
 The release workflow builds the databases from their upstream sources with upstream
-Hydra's own fetchers, on the date recorded in `db\DATABASES.txt`. Twelve ship inside
-the zip; the two whose terms restrict redistribution are downloaded on your PC.
+Hydra's own fetchers, on the date recorded in `db\DATABASES.txt`. Twelve of the gene
+databases ship inside the zip; the two whose terms restrict redistribution are
+downloaded on your PC. The organism typing data follows the same rule and is listed
+in [Organism typing data](#organism-typing-data) below.
 
 | Database | How you get it | Licence / terms | Citation |
 | --- | --- | --- | --- |

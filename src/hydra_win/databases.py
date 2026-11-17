@@ -616,7 +616,9 @@ def install_organisms(store: DatabaseStore, keys: list[str],
                      f"({index + 1}/{len(ordered)})")
         started = time.time()
         try:
-            entry.fetch(root)
+            # install_organism() runs the module's own fetch() and then records
+            # it in the manifest; fetching here as well would download the same
+            # files twice on a PC that has none of them yet.
             store.install_organism(f"typing-{key}", force=True)
             record_outcome(store, f"typing-{key}", None)
             LOG.info("installed %s typing data in %.0fs", entry.title,
