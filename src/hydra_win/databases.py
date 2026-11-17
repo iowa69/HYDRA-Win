@@ -476,9 +476,11 @@ class OrganismRoute:
 ORGANISM_ROUTES: tuple[OrganismRoute, ...] = (
     OrganismRoute(
         "saureus", bundled=("markers", "mlst"), download=("spa",),
-        offline="agr group, SCCmec, PVL, tst, enterotoxins, haemolysins, hlb, "
-                "capsule locus, immune evasion cluster, ACME, blaZ and the MLST "
-                "clonal complex all work offline; the spa type needs the download",
+        offline="agr group, SCCmec, PVL, tst, enterotoxins, haemolysins, hlb "
+                "and the prophage that interrupts it, capsule serotype locus, "
+                "immune evasion cluster, ACME and blaZ all work offline. The spa "
+                "type needs the Ridom download; the clonal complex is derived "
+                "from the sequence type, so it needs the PubMLST download too",
         why="the Ridom spaServer policy expressly limits use of a copy of the "
             "database: \"Copies of the SpaServer database may not be used without "
             "permission to produce database driven web server or any other product "

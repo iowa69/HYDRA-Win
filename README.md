@@ -328,7 +328,7 @@ call.
 
 | Organism | What is typed | Works with no internet |
 | --- | --- | --- |
-| *Staphylococcus aureus* | spa type (Ridom), *agr* group, MLST clonal complex, SCCmec, Panton-Valentine leucocidin, *tst*, enterotoxin and haemolysin repertoires, *hlb* status (and the Sa3int prophage that interrupts it), capsule serotype locus, immune evasion cluster type, ACME, *blaZ* operon | everything **except the spa type** |
+| *Staphylococcus aureus* | spa type (Ridom), *agr* group, MLST clonal complex, SCCmec, Panton-Valentine leucocidin, *tst*, enterotoxin and haemolysin repertoires, *hlb* status (and the Sa3int prophage that interrupts it), capsule serotype locus, immune evasion cluster type, ACME, *blaZ* operon | everything **except the spa type**, which needs the Ridom download, **and the clonal complex**, which is derived from the sequence type and so needs PubMLST |
 | *Streptococcus pyogenes* | emm type and emm cluster with its tissue tropism, virulence and superantigen repertoire, prophage content, regulatory loci, adhesins | everything |
 | *Streptococcus agalactiae* | capsular serotype, alpha-like protein (Alp) type, surface proteins, pilus island type, marker genes, PBP2X substitutions | everything |
 | *Streptococcus pneumoniae* | capsular serotype, PBP type (1A:2B:2X) with the CDC reference MIC where that triplet is in the reference table, macrolide/lincosamide/tetracycline/fluoroquinolone determinants, pilus islets | everything |
