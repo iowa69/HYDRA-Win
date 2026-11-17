@@ -405,6 +405,13 @@ and in the cumulative `Summary` and `Typing_matrix` sheets.
   gene the isolate matches better, the two scores are in the row's evidence, and when
   they are too close to separate the row says so and asks for serology or a
   serogroup-specific PCR.
+* **Eight meningococcal serogroups are validated against genomes with published
+  serogroups** — A, B, C, W, X, Y, E and Z, plus the capsule-null locus, 18 genomes in
+  all, tabulated with their sources in upstream's
+  [`docs/typing/hinf_nmen.md`](https://github.com/iowa69/hydra/blob/typing-integration/docs/typing/hinf_nmen.md).
+  Serogroups **L and H are implemented but unvalidated** — no public assembly with a
+  published L or H serogroup could be found — and a call of either says so in its own
+  caveat rather than looking as solid as the other eight.
 * **No MIC is predicted unless a reference laboratory published the value.** The
   pneumococcal PBP type gives the CDC reference MIC only for a 1A:2B:2X triplet that is
   in the CDC table, and declines otherwise. The nearest-neighbour mode-MIC model was
