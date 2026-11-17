@@ -197,6 +197,73 @@ def test_cumulative_workbook(tmp_path):
     assert {r["Assembly"] for r in long} == {"g1", "g2"}
 
 
+def test_a_contig_end_row_cannot_be_read_as_a_confirmed_loss_of_function(tmp_path):
+    """The owner's decision: disclose it in the row, do not suppress the call.
+
+    The row has to carry three things wherever the reader meets it - that the
+    gene runs off the end of the contig, that this is not evidence of
+    disruption, and that loss of function could not be assessed - and a single
+    matrix or pivot cell is one of the places a reader meets it.
+    """
+    from hydra_amr.records import CONTIG_END_RESOLUTION, CONTIG_END_SUBTYPE
+
+    detail = MutationDetail(
+        symbol="mgrB (contig end)", call_type="contig_end",
+        type_label=("Gene cut by a contig end: NOT evidence of disruption, "
+                    "loss of function not assessed"),
+        location="contig_7:1 (contig start)", gene_location="contig_7:1-140 (-)",
+        intact="20 of 47 residues on this contig (43%)",
+        resistance=("loss of function not established: the gene is cut by a contig "
+                    "end, so the colistin resistance a confirmed loss of function "
+                    "would mean cannot be reported"),
+        description="The mgrB reading frame runs off the start of contig contig_7 ...",
+        unresolved="gene cut by a contig end; the rest of the gene is not in this contig")
+    at_edge = _hit("S1", "protein", "mgrB", start=1, end=140, contig="contig_7",
+                   strand="-", drug_class="COLISTIN", method="DISRUPTX",
+                   resolution=CONTIG_END_RESOLUTION, mutation=detail,
+                   note=("mgrB runs off the end of contig contig_7, so the gene is cut by "
+                         "the assembly: this is NOT evidence of disruption and loss of "
+                         "function could not be assessed."))
+    at_edge.element_subtype = CONTIG_END_SUBTYPE
+
+    assert excel.is_contig_end(at_edge) is True
+    assert excel.weak_font(at_edge) is excel.NOT_CONFIRMED_FONT
+    # Struck through and greyed, so a single cell cannot be mistaken for a call.
+    assert excel.NOT_CONFIRMED_FONT.strike is True
+    assert excel.NOT_CONFIRMED_FONT.italic is True
+    # A matrix cell says it in words as well, because colour is not evidence.
+    text = excel.change_text(at_edge)
+    assert "contig end" in text and "not assessed" in text
+    assert excel.type_colour(at_edge) == excel.CONTIG_END_COLOUR
+
+    # An ordinary partial hit is still only italic: the two must not look alike.
+    partial = _hit("S1", "ncbi", "blaSHV-11", start=1, end=400, resolution="PARTIAL")
+    assert excel.is_contig_end(partial) is False
+    assert excel.weak_font(partial) is excel.PARTIAL_FONT
+    assert excel.PARTIAL_FONT.strike in (None, False)
+
+    # And it reaches the workbook, in columns no view drops.
+    result = _result("S1")
+    result.hits.append(at_edge)
+    excel.write_genome_workbook(result, tmp_path / "S1.xlsx")
+    wb = load_workbook(tmp_path / "S1.xlsx")
+    rows = list(wb["All_hits"].iter_rows(values_only=True))
+    header = list(rows[0])
+    row = next(r for r in rows[1:]
+               if r[header.index("Gene")] == "mgrB"
+               and r[header.index("Database")] == "protein")
+    assert row[header.index("Element subtype")] == CONTIG_END_SUBTYPE
+    assert row[header.index("Resolution")] == CONTIG_END_RESOLUTION
+    note = str(row[header.index("Note")])
+    assert "NOT evidence of disruption" in note
+    assert "loss of function could not be assessed" in note
+    # The "what changed" column leads with it too, so the first cell a reader
+    # reads already says the gene was cut rather than disrupted.
+    changed = str(row[header.index("Mutation: what changed")])
+    assert changed.startswith("mgrB (contig end)")
+    assert "loss of function not assessed" in changed
+
+
 @pytest.mark.parametrize("value,expected", [(100.0, "63BE7B"), (98.5, "A9D18E"),
                                             (96.0, "FFEB84"), (91.0, "FFC266"),
                                             (80.0, "F8696B")])

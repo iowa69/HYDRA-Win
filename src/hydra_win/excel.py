@@ -21,6 +21,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from hydra_amr.records import Hit, SampleResult, TypingResult
+from hydra_amr.typing.organisms import _hinf_nmen_common as capsule_wording
 from hydra_amr.typing.organisms import registry as organisms
 
 # ---------------------------------------------------------------- categories
@@ -89,6 +90,31 @@ SECTION_FILL = PatternFill("solid", fgColor="D9E1F2")
 SECTION_FONT = Font(bold=True, color="1F4E78")
 REDUNDANT_FONT = Font(color="808080")
 PARTIAL_FONT = Font(italic=True)
+#: A row whose gene is cut by a contig end. The call is kept -- hiding it would
+#: hide a real finding behind an assembly artefact -- but it is not a confirmed
+#: loss of function and nothing in the row may let it pass for one, so it is
+#: greyed and struck through wherever a reader meets only a single cell of it
+#: (a matrix cell, a pivot cell), as well as saying so in words.
+NOT_CONFIRMED_FONT = Font(italic=True, strike=True, color="7F7F7F")
+#: ``Hit.resolution`` for such a row, set upstream by
+#: hydra_amr.engines.lesions.disclose_contig_end().
+CONTIG_END_RESOLUTION = "CONTIG_END"
+
+
+def is_contig_end(hit: Hit) -> bool:
+    """Whether this row's gene runs off the end of its contig."""
+    detail = getattr(hit, "mutation", None)
+    return (hit.resolution == CONTIG_END_RESOLUTION
+            or (detail is not None and detail.call_type == "contig_end"))
+
+
+def weak_font(hit: Hit) -> Font | None:
+    """The font for a call that is not a confirmed result, or None."""
+    if is_contig_end(hit):
+        return NOT_CONFIRMED_FONT
+    if hit.resolution == "PARTIAL":
+        return PARTIAL_FONT
+    return None
 THIN = Side(style="thin", color="BFBFBF")
 CELL_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
@@ -245,7 +271,7 @@ def change_text(hit: Hit) -> str:
     if detail is None:
         return label(hit)
     if detail.call_type == "contig_end":
-        return "cut by contig end (not evidence)"
+        return "cut by contig end - not assessed"
     if detail.call_type == "divergent":
         return f"divergent allele ({hit.identity_pct:.1f}% id)"
     if detail.protein_change:
@@ -364,8 +390,9 @@ def write_hit_table(ws: Worksheet, hits: Sequence[Hit], *, leading: Sequence[tup
         colour = MUTATION_COLOUR if category(hit) == MUTATION else identity_colour(hit.identity_pct)
         if colour:
             id_cell.fill = _fill(colour)
-        if hit.resolution == "PARTIAL":
-            ws.cell(row=row, column=identity_col + 1).font = PARTIAL_FONT
+        font = weak_font(hit)
+        if font is not None:
+            ws.cell(row=row, column=identity_col + 1).font = font
     ws.freeze_panes = "B2" if mutations else "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(titles))}{max(row, 1)}"
     _autosize(ws, maximum=50)
@@ -656,6 +683,23 @@ def is_undetermined(call) -> bool:
     return text in UNDETERMINED or text.startswith("not determined")
 
 
+#: Phrases a typing call uses when it names a type but could not establish it.
+#: Taken from upstream rather than guessed at, so the two cannot drift apart:
+#: this is the wording the capsule callers use for a gene cut by a contig end.
+NOT_ASSESSED_CALLS = (capsule_wording.AT_CONTIG_END, capsule_wording.NOT_ASSESSED)
+
+
+def is_not_assessed(call) -> bool:
+    """A call that names a type but says it could not be confirmed.
+
+    Not the same as undetermined - there is a type, and it is reported - but
+    not the same as a clean call either, so a reader skimming the column has to
+    be able to see the difference without reading the caveat.
+    """
+    text = str(call or "")
+    return any(marker in text for marker in NOT_ASSESSED_CALLS)
+
+
 def evidence_text(typing: TypingResult) -> str:
     """The ``alleles`` mapping, one ``key = value`` per line.
 
@@ -724,6 +768,7 @@ def write_typing(ws: Worksheet, result: SampleResult) -> int:
     rows = typing_rows(result)
     for r, values in enumerate(rows, start=header_row + 1):
         undetermined = is_undetermined(values[3])
+        not_assessed = is_not_assessed(values[3])
         for c, value in enumerate(values, start=1):
             cell = ws.cell(row=r, column=c, value=_clean(value))
             cell.border = CELL_BORDER
@@ -731,6 +776,10 @@ def write_typing(ws: Worksheet, result: SampleResult) -> int:
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
             if undetermined and c == 4:
                 cell.fill = _fill(MISSING_FILL)
+            elif not_assessed and c == 4:
+                # A type that is named but was not established: the call stays,
+                # greyed and struck through so it cannot be read as confirmed.
+                cell.font = NOT_CONFIRMED_FONT
     ws.freeze_panes = f"A{header_row + 1}"
     ws.auto_filter.ref = (f"A{header_row}:{get_column_letter(len(TYPING_COLUMNS))}"
                           f"{header_row + len(rows)}")
@@ -860,8 +909,9 @@ def write_pivot(ws: Worksheet, result: SampleResult, databases: Sequence[str]) -
                 cell.number_format = "0.0"
                 cell.alignment = Alignment(horizontal="center")
                 cell.fill = _fill(identity_colour(call.identity_pct))
-            if call.resolution == "PARTIAL":
-                cell.font = PARTIAL_FONT
+            font = weak_font(call)
+            if font is not None:
+                cell.font = font
             if cat != MUTATION and call.gene != p.gene:
                 cell.comment = Comment(f"{name}: {call.gene}", "HYDRA-Win")
         tail_col = 4 + len(db_columns)
@@ -1039,6 +1089,8 @@ def write_typing_matrix(ws: Worksheet, results: Sequence[SampleResult]) -> int:
                 continue
             if is_undetermined(typing.call):
                 cell.fill = _fill(MISSING_FILL)
+            elif is_not_assessed(typing.call):
+                cell.font = NOT_CONFIRMED_FONT
             if typing.note:
                 cell.comment = Comment(typing.note[:2000], "HYDRA-Win")
     if not columns:
@@ -1116,8 +1168,9 @@ def write_matrix(ws: Worksheet, results: Sequence[SampleResult], cats: Sequence[
             cell.number_format = "0.0"
             cell.alignment = Alignment(horizontal="center")
             cell.fill = _fill(MUTATION_COLOUR if mutation else identity_colour(hit.identity_pct))
-            if hit.resolution == "PARTIAL":
-                cell.font = PARTIAL_FONT
+            font = weak_font(hit)
+            if font is not None:
+                cell.font = font
     last_col = max(len(lead), len(lead) + len(columns))
     last_row = 2 + len(results)
     ws.freeze_panes = ws.cell(row=3, column=first)

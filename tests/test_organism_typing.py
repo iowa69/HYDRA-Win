@@ -64,25 +64,112 @@ def test_the_ridom_spa_database_is_downloaded_not_shipped():
     assert "markers" in route.bundled and "mlst" in route.bundled
 
 
-def test_the_meningococcus_ships_nothing_because_all_of_it_is_pubmlst():
+def test_the_meningococcus_now_ships_because_its_pubmlst_data_is_pre_2025():
+    """The owner's decision: bundle the snapshot so the typing works offline.
+
+    Every meningococcal database is PubMLST nomenclature data, and PubMLST's
+    terms let the pre-2025 data an anonymous download returns be redistributed.
+    So all of it ships, and nothing is left for a first-launch download.
+    """
     route = databases.ORGANISM_BY_KEY["nmeningitidis"]
-    assert route.bundled == ()
-    assert "PubMLST" in route.why
-    for db in organisms.get("nmeningitidis").databases:
-        if db.name != "antigens":
-            assert db.redistribution == "restricted"
+    entry = organisms.get("nmeningitidis")
+    assert route.download == ()
+    assert set(route.bundled) == {db.name for db in entry.databases}
+    for db in entry.databases:
+        assert db.redistribution == "permitted", db.name
+        if "pubmlst" in db.source:
+            # The claim has to carry its own basis, in the module's own words.
+            assert "31 December 2024" in db.licence, db.name
+            assert "anonymous" in db.notes.lower(), db.name
 
 
-def test_no_module_is_ever_given_a_pubmlst_api_key():
-    """Anonymous access is what makes the pre-2025 data redistributable."""
-    root = organisms.modules()["saureus"].module.__file__.rsplit("/", 1)[0]
+def test_the_haemophilus_mlst_ships_and_only_the_gpl_cap_set_is_downloaded():
+    route = databases.ORGANISM_BY_KEY["hinfluenzae"]
+    assert route.download == ("cap",)
+    assert "mlst" in route.bundled
+    mlst = next(d for d in organisms.get("hinfluenzae").databases if d.name == "mlst")
+    assert mlst.redistribution == "permitted"
+    assert "31 December 2024" in mlst.licence
+
+
+def test_a_capsule_call_that_names_a_type_it_could_not_confirm_is_marked():
+    """Decision 1's third wording, carried into the sheet.
+
+    `B` is a clean call; `B (capsule gene disrupted)` is a determined call with
+    a lesion, and must read as determined; `B (capsule gene at a contig end,
+    expression not assessed)` names a serogroup nothing established, so it is
+    neither undetermined nor clean and the cell says so.
+    """
+    from hydra_amr.typing.organisms import nmeningitidis as nm
+
+    clean = "B"
+    disrupted = nm.qualified_call("B", nm.DISRUPTED)
+    at_edge = nm.qualified_call("B", nm.AT_CONTIG_END)
+
+    for call in (clean, disrupted, at_edge):
+        assert not excel.is_undetermined(call), call
+    assert not excel.is_not_assessed(clean)
+    # A lesion is a finding, not an absence of one: it must not be struck out.
+    assert not excel.is_not_assessed(disrupted)
+    assert excel.is_not_assessed(at_edge)
+    # And the phrases come from upstream, so the two cannot drift apart.
+    assert nm.AT_CONTIG_END in excel.NOT_ASSESSED_CALLS
+
+
+def test_the_pubmlst_schemes_are_bundled_so_mlst_works_offline():
+    assert "pubmlst" in databases.BUNDLED
+    assert "pubmlst" not in databases.FIRST_LAUNCH
+    route = next(r for r in databases.ROUTES if r.name == "pubmlst")
+    assert route.route == "bundled"
+    # The reason has to be in the zip's own notice, not only in a commit message.
+    assert "31 December 2024" in route.why
+    assert "anonymous" in route.why.lower()
+    assert "Jolley" in route.why
+
+
+def test_the_allele_sets_are_shipped_once_not_once_per_module(tmp_path):
+    """Three modules would otherwise ship a second copy of a bundled scheme."""
+    root = databases.organism_root(DatabaseStore(tmp_path))
+    for key, (_scheme, pattern) in (
+            (k, organisms.shared_with_pubmlst(k)[0])
+            for k in ("nmeningitidis", "hinfluenzae", "salmonella")):
+        target = organisms.get(key).root(root) / pattern.replace("*", "")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(">locus_1\nACGT\n")
+        (target.parent / "profiles.txt").write_text("ST\tlocus\n1\t1\n")
+        shared = databases.shared_pubmlst_copies(key, root)
+        assert target in shared, key
+        # The profile table is not shared: it carries the clonal complex or the
+        # eBurst group, which Hydra's scheme-agnostic MLST call does not.
+        assert (target.parent / "profiles.txt") not in shared, key
+        route = databases.ORGANISM_BY_KEY[key]
+        assert target not in set(databases.organism_bundled_files(route, root)), key
+
+    # S. aureus already shipped no second copy, so it has nothing to drop.
+    assert organisms.shared_with_pubmlst("saureus") == ()
+
+
+def test_no_fetcher_is_ever_given_a_pubmlst_api_key():
+    """Anonymous access is the whole basis for redistributing the snapshot.
+
+    Authenticating would return post-2024 data, which the terms forbid us to
+    redistribute, so the zip would stop being redistributable the moment a
+    credential appeared in any fetcher - not only in an organism module, which
+    is why the whole vendored package is read and not just that directory.
+    """
     import pathlib
 
-    for path in sorted(pathlib.Path(root).glob("*.py")):
-        text = path.read_text()
+    import hydra_amr
+
+    root = pathlib.Path(hydra_amr.__file__).parent
+    checked = 0
+    for path in sorted(root.rglob("*.py")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        checked += 1
         for forbidden in ("api_key", "apikey", "oauth", "Authorization",
                           "client_secret", "token="):
-            assert forbidden not in text, f"{path.name} mentions {forbidden}"
+            assert forbidden not in text, f"{path.relative_to(root)} mentions {forbidden}"
+    assert checked > 20, "the vendored package was not actually walked"
 
 
 def test_every_route_says_what_works_offline():
