@@ -208,13 +208,20 @@ failed. Every run also writes `hydra-win.log` into the results folder.
 
 ### When a download fails
 
-Only PubMLST and CARD are downloaded. HYDRA-Win uses the Windows network settings, as
-your browser does: the system proxy (including automatic proxy configuration scripts),
-the Windows certificate store (so a hospital network that inspects HTTPS works), and,
-if Python's own connection is refused, Windows' own downloader with your logon
-credentials (for proxies that ask for them). Each download is retried, and the reason
-for a failure (an HTTP status, an untrusted certificate, a timeout, a proxy refusal, a
-name that does not resolve) is written to the log and shown under **Databases…**.
+Six things are downloaded on first launch: PubMLST, CARD, the Ridom *spa* database,
+hicap's *cap* database, ShigEiFinder and the *N. meningitidis* typing data. For
+PubMLST and CARD, HYDRA-Win uses the Windows network settings, as your browser does:
+the system proxy (including automatic proxy configuration scripts), the Windows
+certificate store (so a hospital network that inspects HTTPS works), and, if Python's
+own connection is refused, Windows' own downloader with your logon credentials (for
+proxies that ask for them). Each download is retried, and the reason for a failure (an
+HTTP status, an untrusted certificate, a timeout, a proxy refusal, a name that does not
+resolve) is written to the log and shown under **Databases…**.
+
+The organism typing modules fetch their own data with Python's standard downloader.
+That uses the Windows certificate store and the proxy Windows reports for the process,
+but not the PowerShell fallbacks above. On a network where those fetches fail, the
+import route below installs them as well.
 
 If this PC still cannot reach the servers:
 
@@ -223,10 +230,14 @@ If this PC still cannot reach the servers:
 2. On this PC, open **Databases…** → **Import from folder…** and choose that folder
    (or the whole HYDRA-Win folder), or run `HYDRA-Win.exe --import-db E:\db`.
 
-Without them, analyses still run with the other twelve databases. The window, the
-log and every `Summary` sheet state what was not done, for example *NO MLST: the
-PubMLST schemes are not installed, so no sequence type was determined; an empty ST is
-not a negative result*, and the MLST cell reads *not typed* rather than staying empty.
+Importing a folder installs the organism typing data too, not only PubMLST and CARD.
+
+Without them, analyses still run with the twelve bundled databases and the bundled
+organism typing data. The window, the log and every `Summary` sheet state what was not
+done, for example *NO MLST: the PubMLST schemes are not installed, so no sequence type
+was determined; an empty ST is not a negative result*, the MLST cell reads *not typed*
+rather than staying empty, and an organism call whose database is missing reads *not
+determined* with the reason on the same row of the `Typing` sheet.
 
 ### Upgrading
 
