@@ -1,4 +1,4 @@
-Portable Windows build of [Hydra](https://github.com/iowa69/hydra) (vendored at commit `c7b0f9d`) by Giovanni Lorenzin · IOWA-BioTech.
+Portable Windows build of [Hydra](https://github.com/iowa69/hydra) (vendored at commit `7d4198e`) by Giovanni Lorenzin · IOWA-BioTech.
 
 **Install:** unzip into a folder you can write to (Downloads or Desktop, not Program Files), then double-click `HYDRA-Win.exe`. Twelve of the fourteen gene and typing databases, and the organism typing data for seven of the eight organisms, are in the zip. On first launch HYDRA-Win downloads what a licence does not let it carry: PubMLST (MLST), CARD, the Ridom *spa* database, hicap's *cap* database, ShigEiFinder and the *N. meningitidis* data. If this PC cannot reach them, import a copy from another PC (**Databases… → Import from folder…** or `--import-db`).
 
