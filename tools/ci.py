@@ -777,7 +777,19 @@ def smoke_offline(zip_path: Path, work: Path, genome: Path, *, suffix: str = "",
     app = next(parent.glob(f"*/{APP}.exe"))
     problems = []
     # Its own home: the first smoke run's home (with the downloads) must not be shared.
-    home = work / f"offline_home{suffix}"
+    #
+    # The home's name carries no space, and that is deliberate. Setting
+    # HYDRA_WIN_HOME makes it the *only* home candidate, so runtime._resolve_home
+    # cannot fall back to one of the ASCII-only paths it would otherwise try when
+    # a candidate has no BLAST-safe spelling - and makeblastdb builds absolute
+    # paths from its working directory internally and fails with "Database memory
+    # map file error" on a directory containing a space, which is what
+    # winsafe._anchor_cwd exists to avoid. A run with "offline_home saureus" fails
+    # exactly there, in the organism module that builds its index beside its data.
+    # The awkward path is still tested: the app itself is unzipped into
+    # "offline app ü", and the unforced home of the networked smoke run is under
+    # "Hydra wïn smoke ü".
+    home = work / f"offline_home{suffix.replace(' ', '_')}"
     shutil.rmtree(home, ignore_errors=True)
     fresh = {"HYDRA_WIN_HOME": str(home)}
     status_file = work / f"offline-db-status{suffix}.json"
@@ -1098,10 +1110,10 @@ def cmd_gui_smoke(work: Path) -> None:
             or screen.get("log_bottom", 10 ** 6) > bottom:
         problems.append("the window or its log does not fit on the screen")
     dbs = data.get("databases", {})
-    # 14 gene/typing databases plus one row per organism typing module. The
-    # N. meningitidis row is the only one that is not installed: every one of
-    # its databases is PubMLST data, and the --fetch-db step at the start of
-    # the smoke test installs it, so by now even that one is present.
+    # 14 gene/typing databases plus one row per organism typing module, and by
+    # now every one is installed: the zip carries all but CARD and three
+    # organism sets, and the --fetch-db step at the start of the smoke test
+    # has fetched those.
     rows_shown = dbs.get("rows", [])
     if len(rows_shown) != 14 + 8 or not all(r["installed"] for r in rows_shown):
         problems.append(f"Databases dialog: {dbs}")

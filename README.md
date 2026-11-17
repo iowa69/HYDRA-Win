@@ -9,7 +9,7 @@
     <img src="https://img.shields.io/badge/%E2%AC%87%20Download%20HYDRA--Win%20for%20Windows-2ea44f?style=for-the-badge" alt="Download HYDRA-Win for Windows" height="56">
   </a>
   <br>
-  <sub>One zip, about 78 MB. Unzip, double-click <code>HYDRA-Win.exe</code>. No install.</sub>
+  <sub>One zip, about 95 MB. Unzip, double-click <code>HYDRA-Win.exe</code>. No install.</sub>
 </p>
 
 A portable Windows app for the bacterial genome analyser
@@ -606,7 +606,7 @@ expressly limited to non-commercial use by people who download it themselves.
 Everything else — including all the meningococcal data, which is PubMLST
 nomenclature throughout — is in the zip.
 
-The organism typing data is about 42 MB before compression, and the release workflow prints the figure it actually built. `db\DATABASES.txt` lists, for
+The organism typing data is about 34 MB before compression, and the PubMLST snapshot about 108 MB; the release workflow prints both figures as it builds them. `db\DATABASES.txt` lists, for
 every one of these, the exact source URL, the version or retrieval date, the licence in
 the source's own words, the redistribution status the source states, and the citation.
 If you hold rights in any of them and want it removed from the zip, please
