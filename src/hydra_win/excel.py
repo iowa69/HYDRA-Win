@@ -307,7 +307,8 @@ def mutation_lines(result: SampleResult) -> list[str]:
         detail = mutation_detail(hit)
         what = detail.resistance if detail is not None else (hit.drug_class or "").lower()
         if detail is not None and detail.call_type == "contig_end":
-            what = "gene cut by a contig end, not evidence of disruption"
+            what = ("gene cut by a contig end: NOT evidence of disruption, loss of "
+                    "function not assessed")
         out.append(f"{label(hit)} ({what})" if what else label(hit))
     return out
 
@@ -1222,8 +1223,9 @@ def write_mutation_matrix(ws: Worksheet, results: Sequence[SampleResult], title:
     ws.cell(row=2, column=1, value="Above each gene: the resistance its calls are associated "
                                    "with. Cell: the change the assembly carries (empty = none "
                                    "detected). Blue: substitution, rRNA or promoter change; "
-                                   "orange: gene disruption; grey: gene cut by a contig end (not "
-                                   "evidence).").font = Font(italic=True, size=9)
+                                   "orange: gene disruption; grey and struck through: gene cut "
+                                   "by a contig end - NOT evidence of disruption, and loss of "
+                                   "function was not assessed.").font = Font(italic=True, size=9)
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=4)
     ws.cell(row=2, column=1).alignment = Alignment(wrap_text=True, vertical="top")
     for offset, (resistance, _gene) in enumerate(columns):

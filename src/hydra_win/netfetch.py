@@ -1,7 +1,8 @@
 """Downloads that work where the user's browser works, and say why when they do not.
 
-Only the two first-launch databases (PubMLST, CARD) are downloaded on the
-user's PC; everything else ships in the zip. Upstream's fetcher
+Only CARD and three organism typing sets (the Ridom spa database, hicap's cap
+database, ShigEiFinder) are downloaded on the user's PC; everything else,
+including the PubMLST MLST schemes, ships in the zip. Upstream's fetcher
 (:mod:`hydra_amr.db.fetch`) uses plain ``urllib``, which on a hospital network
 typically fails in one of three ways a browser does not:
 
