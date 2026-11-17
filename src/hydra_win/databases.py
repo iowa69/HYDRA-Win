@@ -63,9 +63,10 @@ class Route:
     why: str
 
 
-NO_LICENCE = ("bundled at the project owner's request: the source states no licence; "
-              "redistributed for years by abricate's public repository; a rights holder can "
-              "ask for removal (see DATABASES.txt)")
+NO_LICENCE = ("the source states no licence or terms; shipped under the project owner's "
+              "policy (no stated terms: ship; expressly restrictive terms: download on first "
+              "launch), which is not a licence from the source; a rights holder can ask for "
+              "removal (see DATABASES.txt)")
 
 #: Every database HYDRA-Win installs, in install order (protein first: the
 #: nucleotide importers borrow its drug-class annotation).
@@ -401,10 +402,12 @@ def write_notice(db_root: Path, kleborate_source: str = "") -> None:
         "are downloaded from their source on your computer (or imported from a copy",
         "made on another PC: HYDRA-Win.exe --import-db FOLDER).",
         "",
-        "VFDB, ARG-ANNOT, MEGARes, E. coli VF and EcOH state no licence at all. They",
-        "are bundled at the project owner's request, as abricate's public repository",
-        "has long redistributed them, with their sources and citations below. If you",
-        "hold rights in one of them and want it removed from the zip, open an issue at",
+        "Which databases ship follows the project owner's policy: a source that states",
+        "no licence or terms is shipped in the zip; a source that expressly restricts",
+        "redistribution (CARD, PubMLST) is downloaded on first launch. VFDB, ARG-ANNOT,",
+        "MEGARes, E. coli VF and EcOH state no licence at all, so they are shipped. That",
+        "is the owner's decision, not a licence granted by those sources. If you hold",
+        "rights in one of them and want it removed from the zip, open an issue at",
         "https://github.com/iowa69/HYDRA-Win/issues and it will be moved back to a",
         "first-launch download.",
         "",
@@ -417,8 +420,10 @@ def write_notice(db_root: Path, kleborate_source: str = "") -> None:
         if route.name in ABRICATE_ONLY:
             lines.append(f"{'':14s} copy:     abricate repository, commit {ABRICATE_COMMIT}")
         if entry.get("version") or entry.get("installed"):
-            lines.append(f"{'':14s} version:  {entry.get('version') or 'not stated by the source'}"
-                         f"; built {entry.get('installed', '')[:10]}")
+            version = entry.get("version")
+            if not version or version == "unknown":
+                version = "not stated by the source"
+            lines.append(f"{'':14s} version:  {version}; retrieved {entry.get('installed', '')[:10]}")
         if spec and spec.citation:
             lines.append(f"{'':14s} citation: {spec.citation}")
         lines.append("")

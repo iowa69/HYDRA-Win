@@ -349,7 +349,7 @@ Two pieces are added for Windows:
 
 The release workflow builds the databases from their upstream sources with upstream
 Hydra's own fetchers, on the date recorded in `db\DATABASES.txt`. Twelve ship inside
-the zip; the two whose terms withhold redistribution are downloaded on your PC.
+the zip; the two whose terms restrict redistribution are downloaded on your PC.
 
 | Database | How you get it | Licence / terms | Citation |
 | --- | --- | --- | --- |
@@ -366,10 +366,14 @@ the zip; the two whose terms withhold redistribution are downloaded on your PC.
 | PubMLST 7-locus schemes | downloaded on first launch | PubMLST terms: data downloaded since 2025 may not be redistributed or repackaged | Jolley, Bray & Maiden 2018, Wellcome Open Res 3:124 |
 | CARD | downloaded on first launch | CARD terms: no redistribution without McMaster University's written consent; free for academic/non-commercial use | Alcock et al. 2023, Nucleic Acids Res 51:D690 |
 
-VFDB, ARG-ANNOT, MEGARes, *E. coli* VF and EcOH state no licence at all. They are
-bundled at the project owner's request, as abricate's public repository has long
-redistributed them, with their sources, dates and citations in `db\DATABASES.txt`. If
-you hold rights in one of them and want it removed from the zip, please
+Which databases ship in the zip follows the project owner's policy: a database whose
+source states no licence or terms is shipped inside the zip; a database whose source
+expressly states terms that restrict redistribution (CARD, PubMLST) is downloaded on
+your PC the first time HYDRA-Win runs. VFDB, ARG-ANNOT, MEGARes, *E. coli* VF and EcOH
+state no licence at all, so they are shipped. That is the owner's decision for this
+project, not a licence granted by those sources: their sources, the copy used, the date
+it was retrieved and the citation are in `db\DATABASES.txt`. If you hold rights in one
+of them and want it removed from the zip, please
 [open an issue](https://github.com/iowa69/HYDRA-Win/issues) and it will go back to
 being a first-launch download.
 
