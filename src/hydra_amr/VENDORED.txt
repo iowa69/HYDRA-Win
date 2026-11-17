@@ -2,9 +2,9 @@ Vendored copy of hydra_amr
 ==========================
 
 Source:   https://github.com/iowa69/hydra
-Commit:   0bad0b0744a8bacc7d5d5004dd96faa71534c7b4  (branch typing-integration,
+Commit:   c020035fbd2c3850bb0684f8ab33c9bbaf52c4f5  (branch typing-integration,
           2026-11-17, hydra_amr 1.4.0). That branch is open as pull request #3
-          and is cut from #2 (mutation-detail), so it contains both.
+          and merges #2 (mutation-detail), so it contains both.
 Path:     src/hydra_amr  (copied verbatim, plus the upstream LICENSE file)
 Licence:  MIT (see LICENSE in this directory)
 
@@ -73,6 +73,46 @@ What the vendored branch adds beyond main (pull request #3):
                       HYDRA-Win does not import report/, and installs the
                       organism data through hydra_win/databases.py instead, but
                       both are kept so the copy stays diffable against upstream.
+
+What this re-vendor brought in (the five decisions of v0.5.0):
+
+  engines/lesions.py  disclose_contig_end(): a gene cut by a contig end is
+  records.py          still reported, and the row now says so in its own
+  typing/lineage.py   columns - element_subtype DISRUPTION_AT_CONTIG_END and
+                      resolution CONTIG_END, both named in records.py - with the
+                      note leading on it and the resistance field no longer
+                      asserting a loss of function that was never established.
+                      resistance_score() ignores such a row, so an unassessable
+                      lesion is not counted as resistance that is present.
+                      hydra_win/excel.py styles these rows with
+                      NOT_CONFIRMED_FONT wherever a reader meets a single cell.
+
+  engines/protein.py  pmrB (K. pneumoniae complex, colistin) and acrR
+                      (Escherichia, multidrug) added to LOSS_OF_FUNCTION, which
+                      is what makes Hydra report HS11286's pmrB_A21DfsTer16
+                      (Kleborate's pmrB:p.Gly20fs) and EC958's acrR_F180LfsTer3
+                      (AMRFinderPlus's own symbol). tools/ci.py asserts both.
+
+  db/fetch.py         verify_pubmlst_is_pre_2025(), pubmlst_access_note() and
+  db/registry.py      write_pubmlst_provenance(), plus PUBMLST_TERMS quoted once.
+                      This is what lets the PubMLST snapshot be bundled: the
+                      terms permit redistributing data submitted on or before
+                      2024-12-31, an anonymous client can see nothing else, and
+                      the build now asks the server to confirm it rather than
+                      taking it on trust. tools/ci.py check_pubmlst_bundle()
+                      fails the build if the confirmation is missing.
+
+  typing/organisms/   the meningococcal and H. influenzae PubMLST data is
+    nmeningitidis.py  recorded as redistributable, so hydra_win/databases.py
+    hinfluenzae.py    ships it; a disrupted capsule is called
+    _hinf_nmen_common "B (capsule gene disrupted)" rather than a bare NG, and
+    registry.py       the same wording is shared with the H. influenzae module;
+                      rank_serogroups() separates W from Y on the sequence
+                      instead of on the serogroup's name; and
+                      DB_SHARED_WITH_PUBMLST names the per-module allele sets
+                      the bundled pubmlst database replaces, which is what
+                      hydra_win/databases.py shared_pubmlst_copies() reads so
+                      the zip carries one copy and not five.
 
 Upstream modules HYDRA-Win does not import (cli.py, report/, engines/reads.py's
 read-mapping code paths) are kept for the same reason; the read engine imports
