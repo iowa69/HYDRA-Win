@@ -715,25 +715,35 @@ def organism_notice_lines(db_root: Path) -> list[str]:
         if route.why:
             for chunk in _wrap(route.why, 86):
                 lines.append(f"{'':4s}{chunk}")
-        lines.append(f"{'':2s}works offline: ")
+        lines.append(f"{'':2s}works offline:")
         for chunk in _wrap(route.offline, 86):
             lines.append(f"{'':4s}{chunk}")
         for db in entry.databases:
             where = "bundled" if db.name in route.bundled else "first launch"
             lines.append(f"{'':2s}- {db.name} [{where}]")
-            lines.append(f"{'':6s}source:   {db.source}")
-            lines.append(f"{'':6s}version:  {db.version}")
-            lines.append(f"{'':6s}licence:  {db.licence}")
-            lines.append(f"{'':6s}redistribution as stated by the source: "
-                         f"{db.redistribution}")
+            fields = [("source", db.source), ("version", db.version),
+                      ("licence", db.licence),
+                      ("the source states redistribution is", db.redistribution)]
             if db.notes:
-                lines.append(f"{'':6s}notes:    {db.notes}")
+                fields.append(("notes", db.notes))
             ref = next((r for r in entry.references if r.key == db.reference), None)
             if ref is not None:
                 doi = f" doi:{ref.doi}" if ref.doi else ""
                 pmid = f" PMID:{ref.pmid}" if ref.pmid else ""
-                lines.append(f"{'':6s}citation: {ref.authors} ({ref.year}) "
-                             f"{ref.title}. {ref.journal}.{doi}{pmid}")
+                fields.append(("citation", f"{ref.authors} ({ref.year}) {ref.title}. "
+                                           f"{ref.journal}.{doi}{pmid}"))
+            # Wrapped, with a hanging indent: this file is read in Notepad, and
+            # a quoted licence can run to several hundred characters.
+            for label, value in fields:
+                chunks = _wrap(value, 76)
+                if len(label) > 9:
+                    lines.append(f"{'':6s}{label}:")
+                    for chunk in chunks:
+                        lines.append(f"{'':16s}{chunk}")
+                    continue
+                lines.append(f"{'':6s}{label + ':':<10s}{chunks[0]}")
+                for chunk in chunks[1:]:
+                    lines.append(f"{'':16s}{chunk}")
         installed = entry.missing_databases(root)
         if installed:
             lines.append(f"{'':2s}not present in this copy: {', '.join(installed)}")

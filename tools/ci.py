@@ -85,12 +85,17 @@ EXPECT = {
               "offline_typing": {
                   "Phylogroup (Clermont)": "B2",
                   "fimH allele (FimTyper)": "fimH30",
-                  "Pathotype": "ExPEC"},
+                  "Pathotype": "ExPEC",
+                  "Shiga toxin subtype": "none detected"},
+              "offline_undetermined": {
+                  "Shigella / EIEC cluster": "the ShigEiFinder gene sets"},
               "headline": "ExPEC \u00b7 phylogroup B2"},
     "USA300": {"species": "Staphylococcus aureus", "st": "8",
-               "genes": ["mecA", "blaZ"],
-               "mutations": [],
-               "matrix": {},
+               # SCCmec IVa carries mecA; the three small plasmids of FPR3757
+               # carry erm(C) (pUSA01), tet(K) (pUSA02) and mupA (pUSA03).
+               "genes": ["mecA", "erm(C)", "tet(K)"],
+               "mutations": ["gyrA_S84L", "parC_S80Y"],
+               "matrix": {"gyrA": "S84L"},
                # USA300 FPR3757 (Diep 2006): ST8/CC8, spa t008, agr group I,
                # PVL positive, capsule serotype 5, immune evasion cluster type
                # B, ACME present, hlb interrupted by the Sa3int prophage.
@@ -102,15 +107,21 @@ EXPECT = {
                    "Capsule serotype (cap locus)": "5",
                    "Immune evasion cluster (IEC type)": "type B",
                    "Toxic shock toxin (tst)": "negative"},
-               # Everything except spa, whose database is a first-launch
-               # download (the Ridom policy).
+               # What the bundled data alone can call, with no network.
                "offline_typing": {
-                   "MLST clonal complex": "CC8",
                    "agr group": "I",
                    "Panton-Valentine leucocidin (lukS/lukF-PV)": "positive",
                    "Capsule serotype (cap locus)": "5",
                    "Immune evasion cluster (IEC type)": "type B",
-                   "Arginine catabolic mobile element": "arc cluster present"},
+                   "Arginine catabolic mobile element": "arc cluster present",
+                   "beta-haemolysin (hlb) status": "disrupted by prophage integration"},
+               # ... and what it cannot, with what is missing. The spa database
+               # is withheld by the Ridom policy; the clonal complex is derived
+               # from the sequence type, and PubMLST is a first-launch download
+               # too, so offline there is no ST to derive it from.
+               "offline_undetermined": {
+                   "spa type (Ridom)": "the Ridom spa database",
+                   "MLST clonal complex": "the PubMLST sequence type"},
                "headline": "spa t008 \u00b7 CC8 \u00b7 agr I"},
 }
 GENOME_SHEETS = ("Summary", "AMR_genes", "Point_mutations", "Virulence", "Plasmids",
@@ -414,12 +425,23 @@ def check_typing_sheet(genome: str, wb, expect: dict, wanted: dict) -> list[str]
         if str(row["Call"]) != call:
             problems.append(f"{genome}: {scheme} = {row['Call']!r}, expected {call!r}")
     for row in organism_rows:
+        scheme = row["Scheme / database"]
+        call = str(row.get("Call") or "")
+        evidence = row.get("Evidence: what the call rests on")
+        caveat = row.get("Caveats, limits and what could not be determined")
         if not row.get("Organism"):
-            problems.append(f"{genome}: {row['Scheme / database']} names no organism")
-        if not row.get("Evidence: what the call rests on"):
-            problems.append(f"{genome}: {row['Scheme / database']} has no evidence")
-        if not row.get("Caveats, limits and what could not be determined"):
-            problems.append(f"{genome}: {row['Scheme / database']} has no caveat text")
+            problems.append(f"{genome}: {scheme} names no organism")
+        if not call:
+            problems.append(f"{genome}: {scheme} has no call at all")
+        # A clean call may have nothing left to qualify, and a "none detected"
+        # has no alleles to show - but no row may be silent on both, or the
+        # reader is given a call with nothing to check it against.
+        if not evidence and not caveat:
+            problems.append(f"{genome}: {scheme} gives neither evidence nor a caveat")
+        # And a call that could not be made must always say why, or it reads
+        # as a negative result.
+        if call.startswith("not determined") and not caveat:
+            problems.append(f"{genome}: {scheme} is 'not determined' with no reason")
     headline = str(wb["Typing"].cell(row=1, column=1).value or "")
     if "headline" in expect and expect["headline"] not in headline:
         problems.append(f"{genome}: Typing sheet title {headline!r} does not carry "
@@ -592,25 +614,22 @@ def smoke_offline(zip_path: Path, work: Path, genome: Path) -> None:
     problems += check_typing_sheet(f"offline {name}", wb, {}, wanted_typing)
     rows = _rows(wb["Typing"], header_row=TYPING_HEADER_ROW)
     by_scheme = {r["Scheme / database"]: r for r in rows}
-    # ... and the one call whose database the zip may not carry must say so
-    # rather than read as a negative.
-    withheld = {"USA300": ("spa type (Ridom)", "spa"),
-                "EC958": ("Shigella / EIEC cluster", "ShigEiFinder")}.get(name)
-    if withheld:
-        scheme, what = withheld
+    # ... and every call whose database the zip may not carry must say so,
+    # with the reason, rather than read as a negative result.
+    for scheme, what in EXPECT[name].get("offline_undetermined", {}).items():
         row = by_scheme.get(scheme)
         if row is None:
-            problems.append(f"offline {name}: no {scheme!r} row at all; a withheld "
-                            f"database must still be reported")
-        else:
-            call = str(row["Call"])
-            caveat = str(row["Caveats, limits and what could not be determined"] or "")
-            if not call.startswith("not determined"):
-                problems.append(f"offline {name}: {scheme} reads {call!r}; without the "
-                                f"{what} database it must read 'not determined'")
-            elif not caveat:
-                problems.append(f"offline {name}: {scheme} is 'not determined' with no "
-                                f"reason given, which reads as a negative result")
+            problems.append(f"offline {name}: no {scheme!r} row at all; a call that "
+                            f"could not be made must still be reported")
+            continue
+        call = str(row["Call"])
+        caveat = str(row["Caveats, limits and what could not be determined"] or "")
+        if not call.startswith("not determined"):
+            problems.append(f"offline {name}: {scheme} reads {call!r}; without "
+                            f"{what} it must read 'not determined'")
+        elif not caveat:
+            problems.append(f"offline {name}: {scheme} is 'not determined' with no "
+                            f"reason given, which reads as a negative result")
     text = log_file.read_text(encoding="utf-8", errors="replace")
     if "not performed (pubmlst missing)" not in text:
         problems.append("the offline log does not say MLST was not performed")

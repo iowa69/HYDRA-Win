@@ -24,9 +24,9 @@ You don't install anything. There's no conda, no admin rights and no console win
 ## Screenshots
 
 The window is shown as the release workflow captured it on Windows, on a 1366×768
-screen, while it drove the real app through an analysis of two public genomes,
-*K. pneumoniae* HS11286 and *E. coli* EC958. The report views are the workbooks that
-run produced.
+screen, while it drove the real app through an analysis of three public genomes,
+*K. pneumoniae* HS11286, *E. coli* EC958 and *S. aureus* USA300 FPR3757. The report
+views are workbooks from a run on those same three assemblies.
 
 **1. Add genomes.** The window opens with three steps: add genomes, choose output and
 options, run. It says up front that it analyses assemblies only.
@@ -400,7 +400,7 @@ contains:
 ## What is (and isn't) included
 
 HYDRA-Win runs upstream Hydra's own analysis code. It uses a pinned copy of
-`hydra_amr` from [iowa69/hydra](https://github.com/iowa69/hydra) at commit `23c8fb0`
+`hydra_amr` from [iowa69/hydra](https://github.com/iowa69/hydra) at commit `c7b0f9d`
 (branch `typing-integration`, open as pull requests #2 and #3), with two small,
 documented Windows patches (see `src/hydra_amr/VENDORED.txt`). With Automatic settings,
 the calls match upstream's `--preset deep`:
