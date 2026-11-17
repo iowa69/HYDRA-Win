@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore: ["**.md", "docs/**"]
   pull_request:
   workflow_dispatch:
 
@@ -96,7 +97,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          zip=$(ls release/*.zip)
+          # Fixed asset name, so the README button can link to
+          # releases/latest/download/HYDRA-Win-windows-x64.zip for every version.
+          zip=release/HYDRA-Win-windows-x64.zip
+          mv release/*.zip "$zip"
           gh release create "$GITHUB_REF_NAME" "$zip" \
-            --title "Hydra-win $GITHUB_REF_NAME" \
+            --title "HYDRA-Win $GITHUB_REF_NAME" \
             --notes-file packaging/RELEASE_NOTES.md

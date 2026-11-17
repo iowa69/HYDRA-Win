@@ -1,6 +1,6 @@
 Portable Windows build of [Hydra](https://github.com/iowa69/hydra) (vendored at commit `6d36c10`).
 
-**Install:** unzip into a folder you can write to (Downloads or Desktop, not Program Files), then double-click `Hydra-win.exe`. On first launch, Hydra-win downloads the databases that can't be redistributed (PubMLST, CARD, VFDB, ARG-ANNOT, MEGARes, E. coli VF, EcOH). This needs an internet connection and takes a few minutes, and only happens once.
+**Install:** unzip into a folder you can write to (Downloads or Desktop, not Program Files), then double-click `Hydra-win.exe`. On first launch, HYDRA-Win downloads the databases that can't be redistributed (PubMLST, CARD, VFDB, ARG-ANNOT, MEGARes, E. coli VF, EcOH). This needs an internet connection and takes a few minutes, and only happens once.
 
 **Input:** FASTA assemblies (`.fasta`, `.fa`, `.fna`, `.fas`, optionally `.gz`). Reads aren't supported.
 

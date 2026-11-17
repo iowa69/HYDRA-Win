@@ -1,4 +1,12 @@
-# Hydra-win
+# HYDRA-Win
+
+<p align="center">
+  <a href="https://github.com/iowa69/HYDRA-Win/releases/latest/download/HYDRA-Win-windows-x64.zip">
+    <img src="https://img.shields.io/badge/%E2%AC%87%20Download%20HYDRA--Win%20for%20Windows-2ea44f?style=for-the-badge" alt="Download HYDRA-Win for Windows" height="56">
+  </a>
+  <br>
+  <sub>One zip, about 70 MB. Unzip, double-click <code>Hydra-win.exe</code>. No install.</sub>
+</p>
 
 A portable Windows app for the bacterial genome analyser
 [Hydra](https://github.com/iowa69/hydra). Give it genome assemblies and it reports
@@ -10,13 +18,13 @@ You don't install anything. There's no conda, no admin rights and no console win
 
 ## Get started
 
-1. Download `Hydra-win-vX.Y.Z-windows-x64.zip` from
-   [Releases](https://github.com/iowa69/hydra-win/releases).
+1. Click the green **Download** button above (or get `HYDRA-Win-windows-x64.zip` from
+   [Releases](https://github.com/iowa69/HYDRA-Win/releases)).
 2. Unzip it into a folder you can write to, for example *Downloads* or *Desktop*
    (not *Program Files*).
 3. Double-click `Hydra-win.exe`.
 
-The first time it starts, Hydra-win downloads the databases it isn't allowed to
+The first time it starts, HYDRA-Win downloads the databases it isn't allowed to
 redistribute (see [Databases](#databases)). This needs an internet connection and takes
 a few minutes. It only happens once.
 
@@ -26,7 +34,7 @@ that compares all the genomes, and click **Run analysis**. When it's done, click
 **Open results folder**.
 
 **Input:** assemblies only. The accepted extensions are `.fasta`, `.fa`, `.fna` and
-`.fas`, each optionally gzipped (`.gz`). If you drop a folder, Hydra-win searches it
+`.fas`, each optionally gzipped (`.gz`). If you drop a folder, HYDRA-Win searches it
 recursively.
 
 ### Headless mode
@@ -88,7 +96,7 @@ contains:
 
 ## What is (and isn't) included
 
-Hydra-win runs upstream Hydra's own analysis code. It uses a pinned copy of
+HYDRA-Win runs upstream Hydra's own analysis code. It uses a pinned copy of
 `hydra_amr` from [iowa69/hydra](https://github.com/iowa69/hydra) at commit `6d36c10`,
 with two small, documented Windows patches (see `src/hydra_amr/VENDORED.txt`). The
 settings match upstream's `--preset deep`:
@@ -103,12 +111,12 @@ settings match upstream's `--preset deep`:
 Two pieces are added for Windows:
 
 * **Species identification.** Upstream uses Mash, which has no Windows build.
-  Hydra-win includes a pure-Python re-implementation of `mash dist` and runs it against
+  HYDRA-Win includes a pure-Python re-implementation of `mash dist` and runs it against
   Kleborate's species sketches. It gives the same shared-hash counts as Mash 2.3 on the
   test genomes. Upstream's species rules are then applied unchanged. Without it,
   upstream's MLST-only fallback names some *Klebsiella* genomes as *E. coli*.
 * **BLAST+ path handling.** BLAST+ on Windows can't cope with spaces or non-ASCII
-  characters in paths. Hydra-win runs it from an ASCII, space-free folder (the 8.3
+  characters in paths. HYDRA-Win runs it from an ASCII, space-free folder (the 8.3
   short name, or `%LOCALAPPDATA%\Hydra-win`) and passes it relative paths, so the app
   works from folders like `C:\Users\Jörg Müller\Downloads`. Its databases are built in
   BLAST's version-4 format, which has no LMDB index; on Windows each LMDB file takes up
@@ -183,11 +191,11 @@ python -m hydra_win --cli ...   # headless
 python -m pytest -q
 ```
 
-`tools/compare_upstream.py` checks a Hydra-win output folder against upstream
+`tools/compare_upstream.py` checks a HYDRA-Win output folder against upstream
 `hydra run --preset deep --format json` on the same genomes and databases.
 
 ## Credit and licence
 
-Hydra-win is MIT-licensed (see `LICENSE`). The analysis is upstream
+HYDRA-Win is MIT-licensed (see `LICENSE`). The analysis is upstream
 [Hydra](https://github.com/iowa69/hydra), also MIT; its licence is kept in
 `src/hydra_amr/LICENSE`. Please cite Hydra and the databases you rely on.
