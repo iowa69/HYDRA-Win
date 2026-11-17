@@ -52,9 +52,10 @@ count.
 
 <p align="center"><img src="docs/screenshots/window-5-running.png" alt="Analysis running" width="860"></p>
 
-**Finished.** Species, MLST, AMR genes and point mutations fill in as each genome
-finishes, and the log lists each mutation with the resistance it is associated with.
-Double-click a row to open its workbook.
+**Finished.** Species, MLST, the headline organism typing, AMR genes and point
+mutations fill in as each genome finishes, and the log lists each mutation with the
+resistance it is associated with. A species no organism module covers says so rather
+than leaving the cell blank. Double-click a row to open its workbook.
 
 <p align="center"><img src="docs/screenshots/window-6-finished.png" alt="Analysis finished with results in the table" width="860"></p>
 
