@@ -2,7 +2,9 @@ Vendored copy of hydra_amr
 ==========================
 
 Source:   https://github.com/iowa69/hydra
-Commit:   6d36c109491c16544e8919fe6962b4b62e97d3d7  (main, 2026-08-15, hydra_amr 1.4.0)
+Commit:   44abc23f82cf0a59e8d23a8be4dc023d65bc70f1  (branch typing-integration,
+          2026-11-17, hydra_amr 1.4.0). That branch is open as pull request #3
+          and is cut from #2 (mutation-detail), so it contains both.
 Path:     src/hydra_amr  (copied verbatim, plus the upstream LICENSE file)
 Licence:  MIT (see LICENSE in this directory)
 
@@ -28,33 +30,50 @@ upstream src/hydra_amr over this directory and re-apply these hunks.
                 with stdin detached and, on Windows, CREATE_NO_WINDOW, so no
                 console window flashes during a database download.
 
-3. Mutation detail (what exactly mutated), additive; proposed to upstream as a
-   pull request with the identical engine code, so this entry disappears at the
-   next re-vendor once it is merged:
-     engines/lesions.py  NEW. For every call already made, reads the assembly at
-                         the place the alignment points to and names the change:
-                         codon/base read from the contig (alignment walked, strand
-                         and indels handled), reference base from the DNA
-                         catalogue's reference sequence or a parsimony inference
-                         labelled as such, AMRFinderPlus/HGVS/Kleborate names,
-                         disruption lesion (stop, frameshift, interruption, start
-                         loss, contig end), resistance in words.
-     records.py          MutationDetail record; Hit gains `mutation` (the detail)
-                         and `evidence` (alignment, never written out); as_row()
-                         and HIT_COLUMNS gain the detail columns at the end.
-     engines/protein.py  the three mutation callers attach `evidence` to the Hit
-                         they already build (POINTX, POINTN, DISRUPTX); the DNA
-                         caller keeps the reference sequences it already reads.
-     pipeline.py         one call to lesions.describe_mutations() per assembly
-                         after screening.
-     engines/reads.py    read-derived site and variant calls get the same detail
-                         (not used by HYDRA-Win, kept identical to upstream).
-     report/             hydra.mutations table, detail in the HTML report (not
-                         used by HYDRA-Win, kept identical to upstream).
-   Which mutations are called is unchanged: tools/compare_upstream.py matches
-   upstream at the commit above on every existing field.
+Nothing else is changed, and there is no third entry any more: the mutation
+detail that v0.3.0 carried as a local patch is upstream code on the vendored
+branch (pull request #2), with the identical engine, and
+tools/compare_upstream.py still checks the workbooks against it.
 
-Nothing else is changed. Upstream modules Hydra-win does not import
-(cli.py, report/, engines/reads.py's read-mapping code paths) are kept so the
-copy stays diffable against upstream; the read engine imports pysam lazily and
-is never called on the assembly path.
+What the vendored branch adds beyond main (pull request #3):
+
+  typing/organisms/   eight organism typing modules - S. aureus, S. pyogenes,
+                      S. agalactiae, S. pneumoniae, H. influenzae,
+                      N. meningitidis, Salmonella, E. coli/Shigella - each with
+                      its own fetch() that installs its data under
+                      <db>/organisms/<key>/, its tests and its documented
+                      method and bibliography (upstream docs/typing/).
+
+  typing/organisms/registry.py
+                      selects the modules for a sample from the species call,
+                      or from the MLST scheme when there is no species call;
+                      gives every scheme a readable heading; records in
+                      DB_LAYOUT which files on disk belong to which declared
+                      database, which is what lets this build ship part of a
+                      module's data and download the rest (see
+                      hydra_win/databases.py, ORGANISM_ROUTES).
+
+  records.py          TypingResult gains title (readable heading), organism
+                      (which module made the call) and the evidence() /
+                      as_detail_row() helpers. Additive: no existing field
+                      changed.
+
+  pipeline.py         runs the organism modules for every assembly, gated by
+                      the existing typing option, and records against the
+                      sample why a module was skipped.
+
+  engines/blast.py    safe_threads(): a translated search runs single-threaded,
+                      because BLAST+ 2.16.0 segfaults on a no-hit
+                      blastx/tblastn when -max_target_seqs is combined with
+                      -num_threads > 1. That is the same BLAST+ 2.16.0 this zip
+                      ships, so the fix matters here as much as on Linux.
+
+  report/, db/        the typing evidence reaches the TSV and HTML output, and
+                      hydra db download typing-<key> installs a module's data.
+                      HYDRA-Win does not import report/, and installs the
+                      organism data through hydra_win/databases.py instead, but
+                      both are kept so the copy stays diffable against upstream.
+
+Upstream modules HYDRA-Win does not import (cli.py, report/, engines/reads.py's
+read-mapping code paths) are kept for the same reason; the read engine imports
+pysam lazily and is never called on the assembly path.

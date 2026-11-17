@@ -22,7 +22,15 @@ a = Analysis(
     pathex=[str(SRC)],
     binaries=binaries,
     datas=datas,
-    hiddenimports=["hydra_amr.db.fetch", "tkinterdnd2", "truststore"],
+    # The organism typing modules are found at run time by name (the registry
+    # keeps an explicit list precisely because a frozen build cannot walk the
+    # package directory), so PyInstaller cannot see the imports and each one
+    # has to be named here.
+    hiddenimports=["hydra_amr.db.fetch", "tkinterdnd2", "truststore"] + [
+        f"hydra_amr.typing.organisms.{name}" for name in (
+            "registry", "base", "strep_common", "_hinf_nmen_common",
+            "ecoli", "hinfluenzae", "nmeningitidis", "sagalactiae",
+            "salmonella", "saureus", "spneumoniae", "spyogenes")],
     excludes=["pandas", "scipy", "matplotlib", "pysam", "IPython", "pytest",
               "hydra_amr.report", "hydra_amr.cli"],
     noarchive=False,

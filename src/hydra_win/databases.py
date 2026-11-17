@@ -34,6 +34,7 @@ from typing import Callable
 from hydra_amr.db import fetch as upstream_fetch
 from hydra_amr.db.manager import DatabaseStore
 from hydra_amr.db.registry import DATABASES, spec_for
+from hydra_amr.typing.organisms import registry as organisms
 from hydra_amr.utils import HydraError
 
 LOG = logging.getLogger("hydra")
@@ -264,6 +265,10 @@ def import_folder(store: DatabaseStore, folder: Path | str,
     if not roots:
         return [], (f"{folder} is not a database folder: it has no manifest.json (copy the whole "
                     "'db' folder that sits next to HYDRA-Win.exe on the other PC)")
+    # The organism typing data travels the same way: it is in the other PC's
+    # manifest under typing-<key>, with its own path under organisms/.
+    names = tuple(names) + tuple(name for name in organism_db_names()
+                                 if name not in names)
     wanted = [name for name in names if not store.is_installed(name)]
     if not wanted:
         return [], "every database is already installed"
@@ -385,6 +390,9 @@ def build_bundle(db_root: Path, names: tuple[str, ...] = BUNDLED) -> Path:
     for name in ("lineage", "species"):
         if store.is_installed(name):
             store.record(name, source=kleborate, version=tag_name)
+    sizes = build_organism_bundle(db_root)
+    LOG.info("organism typing data bundled: %.2f MB in total",
+             sum(sizes.values()) / 1e6)
     write_notice(db_root, kleborate_source=kleborate)
     return db_root
 
@@ -434,7 +442,307 @@ def write_notice(db_root: Path, kleborate_source: str = "") -> None:
                   f"  {kleborate_source}", ""]
     lines += ["ResFinder, PlasmidFinder and SCCmecFinder data: Apache-2.0,",
               "licences/Apache-2.0.txt. Sources are listed above.", ""]
+    lines += organism_notice_lines(db_root)
     (Path(db_root) / "DATABASES.txt").write_text("\n".join(lines), encoding="utf-8")
+
+
+# ---------------------------------------------------------------- organisms
+#: Organism-specific typing data, one entry per upstream module. Which of a
+#: module's declared databases ships inside the zip follows the owner's policy
+#: applied to the ``redistribution`` field the module author recorded:
+#:
+#:   * ``permitted`` or ``unstated`` -> bundled. A source that states no terms
+#:     at all is shipped, which is the owner's decision and not a licence from
+#:     that source; DATABASES.txt says so and invites a removal request.
+#:   * ``restricted`` -> downloaded on the user's own machine on first launch.
+#:
+#: with two deliberate exceptions, both GPL-3.0 data inside an MIT zip. hicap's
+#: *cap* database and ShigEiFinder's gene sets may be redistributed under the
+#: GPL, but only under the GPL -- so they are downloaded rather than mixed into
+#: this zip, which keeps the licence question from arising at all.
+@dataclass(frozen=True)
+class OrganismRoute:
+    key: str
+    #: Declared database names shipped inside the zip.
+    bundled: tuple[str, ...]
+    #: Declared database names fetched on the user's machine at first launch.
+    download: tuple[str, ...]
+    #: What works offline, and what has to wait for the download.
+    offline: str
+    #: Why anything is downloaded rather than shipped.
+    why: str = ""
+
+
+ORGANISM_ROUTES: tuple[OrganismRoute, ...] = (
+    OrganismRoute(
+        "saureus", bundled=("markers", "mlst"), download=("spa",),
+        offline="agr group, SCCmec, PVL, tst, enterotoxins, haemolysins, hlb, "
+                "capsule locus, immune evasion cluster, ACME, blaZ and the MLST "
+                "clonal complex all work offline; the spa type needs the download",
+        why="the Ridom spaServer policy expressly limits use of a copy of the "
+            "database: \"Copies of the SpaServer database may not be used without "
+            "permission to produce database driven web server or any other product "
+            "or service\", and permits non-commercial use by individuals who "
+            "download it themselves - which is what the first-launch download is"),
+    OrganismRoute(
+        "spyogenes", bundled=("emm", "panel"), download=(),
+        offline="everything: emm type and cluster, virulence and superantigen "
+                "repertoire, prophage content, regulatory loci, adhesins"),
+    OrganismRoute(
+        "sagalactiae",
+        bundled=("cps", "panel", "surface_targets", "alp_alleles"), download=(),
+        offline="everything: capsular serotype, Alp type, surface proteins, "
+                "pilus islands, marker genes, PBP2X substitutions"),
+    OrganismRoute(
+        "spneumoniae",
+        bundled=("cps", "cdc-serotype-probes", "cdc-pbp", "cdc-resistance-probes"),
+        download=(),
+        offline="everything: capsular serotype, PBP type and its reference MIC "
+                "where the triplet is in the CDC table, resistance determinants, "
+                "pilus islets"),
+    OrganismRoute(
+        "hinfluenzae", bundled=("ftsI", "bla"), download=("cap", "mlst"),
+        offline="the PBP3 (ftsI) substitution pattern, its rPBP3 group and the "
+                "beta-lactam interpretation work offline; the capsule type and "
+                "the sequence type need the download",
+        why="the cap reference set is package data of hicap, which is GPL-3.0: "
+            "redistributable, but only under the GPL, so it is not mixed into "
+            "this MIT zip. The MLST alleles are PubMLST data"),
+    OrganismRoute(
+        "nmeningitidis", bundled=(),
+        download=("capsule", "peptides", "mlst", "amr", "antigens"),
+        offline="nothing: every meningococcal call needs the first-launch "
+                "download. Until it has run, the typing reads 'not determined' "
+                "with that reason given",
+        why="every one of this module's databases is PubMLST nomenclature data, "
+            "whose terms restrict redistribution of anything submitted after "
+            "2024-12-31. The two porA/fetA reference proteins could be shipped, "
+            "but on their own they type nothing"),
+    OrganismRoute(
+        "salmonella",
+        bundled=("antigens", "serovars", "spi", "markers", "mlst"), download=(),
+        offline="everything: serovar from the antigenic formula, subspecies, H2 "
+                "locus, pathogenicity islands, virulence plasmid, typhoidal "
+                "markers, ST and eBurst group"),
+    OrganismRoute(
+        "ecoli", bundled=("fimtyper", "stxtyper", "virulencefinder"),
+        download=("shigeifinder",),
+        offline="phylogroup, fimH allele, ST131 subclone, Shiga toxin subtype, "
+                "pathotype, intimin subtype and the ExPEC/UPEC virulence panel "
+                "work offline; the Shigella/EIEC cluster call needs the download",
+        why="ShigEiFinder's gene sets are GPL-3.0: redistributable, but only "
+            "under the GPL, so they are not mixed into this MIT zip"),
+)
+
+ORGANISM_BY_KEY = {route.key: route for route in ORGANISM_ROUTES}
+
+#: Organism modules with anything to download on the user's machine.
+ORGANISM_DOWNLOADS = tuple(r.key for r in ORGANISM_ROUTES if r.download)
+
+
+def organism_root(store: DatabaseStore) -> Path:
+    return store.root / organisms.DB_SUBDIR
+
+
+def organism_db_names() -> tuple[str, ...]:
+    """The ``hydra db`` names of the organism typing databases."""
+    return tuple(f"typing-{r.key}" for r in ORGANISM_ROUTES)
+
+
+def organism_bundled_files(route: OrganismRoute, root: Path) -> list[Path]:
+    """Every file of *route* that belongs inside the zip."""
+    entry = organisms.get(route.key)
+    out: list[Path] = []
+    for name in route.bundled:
+        out.extend(entry.files_for(name, root))
+    out.extend(entry.provenance_files(root))
+    return out
+
+
+def organism_status(store: DatabaseStore) -> list[dict]:
+    """One row per organism typing module, for the GUI and the log."""
+    root = organism_root(store)
+    rows = []
+    for route in ORGANISM_ROUTES:
+        entry = organisms.get(route.key)
+        missing_dbs = entry.missing_databases(root)
+        rows.append({
+            "name": f"typing-{route.key}",
+            "title": f"{entry.title} typing",
+            "route": "bundled" if route.bundled and not route.download else
+                     "first launch" if not route.bundled else "bundled + first launch",
+            "licence": " | ".join(
+                f"{db.name}: {db.redistribution}" for db in entry.databases),
+            "installed": entry.installed(root),
+            "complete": not missing_dbs,
+            "missing": missing_dbs,
+            "offline": route.offline,
+            "why": route.why,
+            "impact": "" if entry.installed(root) else
+                      f"no {entry.title} typing: its data is not installed "
+                      f"(not a negative result)",
+        })
+    return rows
+
+
+def organism_missing(store: DatabaseStore) -> list[str]:
+    """Modules that still need their first-launch download."""
+    root = organism_root(store)
+    out = []
+    for route in ORGANISM_ROUTES:
+        entry = organisms.get(route.key)
+        if [name for name in route.download if not entry.files_for(name, root)]:
+            out.append(route.key)
+        elif not entry.installed(root):
+            out.append(route.key)
+    return out
+
+
+def install_organisms(store: DatabaseStore, keys: list[str],
+                      progress: ProgressFn | None = None) -> dict[str, str]:
+    """Run each module's own fetch() on the user's machine. Returns failures."""
+    from . import netfetch  # noqa: PLC0415
+
+    netfetch.install()
+    root = organism_root(store)
+    root.mkdir(parents=True, exist_ok=True)
+    errors: dict[str, str] = {}
+    ordered = [r.key for r in ORGANISM_ROUTES if r.key in keys]
+    for index, key in enumerate(ordered):
+        entry = organisms.get(key)
+        if progress:
+            progress(index / max(1, len(ordered)),
+                     f"Downloading {entry.title} typing data "
+                     f"({index + 1}/{len(ordered)})")
+        started = time.time()
+        try:
+            entry.fetch(root)
+            store.install_organism(f"typing-{key}", force=True)
+            record_outcome(store, f"typing-{key}", None)
+            LOG.info("installed %s typing data in %.0fs", entry.title,
+                     time.time() - started)
+        except Exception as exc:  # noqa: BLE001 - one module must not sink the rest
+            from .netfetch import describe_failure  # noqa: PLC0415
+
+            errors[key] = describe_failure(exc)
+            LOG.error("could not install %s typing data: %s", entry.title, errors[key])
+            record_outcome(store, f"typing-{key}", errors[key])
+    return errors
+
+
+def build_organism_bundle(db_root: Path) -> dict[str, int]:
+    """Build every module's data, then keep only what the zip may carry (CI).
+
+    The modules build all of their own data in one pass, so the restricted
+    parts are fetched here and then deleted: nothing a licence withholds leaves
+    this machine. The download caches go too - 12 MB of RefSeq protein FASTA
+    that nothing reads at run time.
+    """
+    root = organism_root(DatabaseStore(db_root))
+    root.mkdir(parents=True, exist_ok=True)
+    sizes: dict[str, int] = {}
+    for route in ORGANISM_ROUTES:
+        entry = organisms.get(route.key)
+        if not route.bundled:
+            LOG.info("%s: nothing may be bundled; it is a first-launch download",
+                     entry.title)
+            shutil.rmtree(entry.root(root), ignore_errors=True)
+            sizes[route.key] = 0
+            continue
+        last: Exception | None = None
+        for attempt in range(3):
+            try:
+                entry.fetch(root)
+                last = None
+                break
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+                LOG.warning("%s typing data: attempt %d failed (%s); retrying in %ds",
+                            entry.title, attempt + 1, exc, 30 * (attempt + 1))
+                time.sleep(30 * (attempt + 1))
+        if last is not None:
+            raise HydraError(f"could not build the {entry.title} typing data: {last}")
+        keep = {p.resolve() for p in organism_bundled_files(route, root)}
+        for path in sorted(entry.root(root).rglob("*")):
+            if path.is_file() and path.resolve() not in keep:
+                path.unlink()
+        for directory in sorted(entry.root(root).rglob("*"), reverse=True):
+            if directory.is_dir() and not any(directory.iterdir()):
+                directory.rmdir()
+        sizes[route.key] = sum(p.stat().st_size for p in entry.root(root).rglob("*")
+                               if p.is_file())
+        LOG.info("%s: bundled %s (%.2f MB); %s downloaded on first launch",
+                 entry.title, ", ".join(route.bundled), sizes[route.key] / 1e6,
+                 ", ".join(route.download) or "nothing")
+    return sizes
+
+
+def organism_notice_lines(db_root: Path) -> list[str]:
+    """The organism typing section of DATABASES.txt."""
+    root = organism_root(DatabaseStore(db_root))
+    lines = [
+        "",
+        "Organism-specific typing data",
+        "-----------------------------",
+        "",
+        "One set per organism, built by the upstream module that uses it. The same",
+        "policy decides the route: a source that states no licence or terms is shipped",
+        "in the zip, a source that expressly restricts redistribution is downloaded on",
+        "your own computer at first launch. Two sets are downloaded although their",
+        "licence would permit redistribution: hicap's cap database and ShigEiFinder's",
+        "gene sets are GPL-3.0, which is copyleft, and this zip is MIT.",
+        "",
+        "PubMLST data is fetched anonymously and no API key is ever used. Anonymous",
+        "access returns only data submitted on or before 31 December 2024, which",
+        "PubMLST's terms allow to be 'downloaded, used, and redistributed without",
+        "restriction, subject only to proper scientific citation and acknowledgement'.",
+        "A sequence type assigned after that date therefore reads 'not determined',",
+        "with that reason given, rather than being guessed.",
+        "",
+        "If you hold rights in any of these and want it removed from the zip, open an",
+        "issue at https://github.com/iowa69/HYDRA-Win/issues and it will be moved to a",
+        "first-launch download.",
+        "",
+    ]
+    for route in ORGANISM_ROUTES:
+        entry = organisms.get(route.key)
+        lines.append(f"{entry.title} (typing-{route.key})")
+        lines.append(f"{'':2s}bundled in the zip: {', '.join(route.bundled) or 'nothing'}")
+        lines.append(f"{'':2s}downloaded at first launch: "
+                     f"{', '.join(route.download) or 'nothing'}")
+        if route.why:
+            for chunk in _wrap(route.why, 86):
+                lines.append(f"{'':4s}{chunk}")
+        lines.append(f"{'':2s}works offline: ")
+        for chunk in _wrap(route.offline, 86):
+            lines.append(f"{'':4s}{chunk}")
+        for db in entry.databases:
+            where = "bundled" if db.name in route.bundled else "first launch"
+            lines.append(f"{'':2s}- {db.name} [{where}]")
+            lines.append(f"{'':6s}source:   {db.source}")
+            lines.append(f"{'':6s}version:  {db.version}")
+            lines.append(f"{'':6s}licence:  {db.licence}")
+            lines.append(f"{'':6s}redistribution as stated by the source: "
+                         f"{db.redistribution}")
+            if db.notes:
+                lines.append(f"{'':6s}notes:    {db.notes}")
+            ref = next((r for r in entry.references if r.key == db.reference), None)
+            if ref is not None:
+                doi = f" doi:{ref.doi}" if ref.doi else ""
+                pmid = f" PMID:{ref.pmid}" if ref.pmid else ""
+                lines.append(f"{'':6s}citation: {ref.authors} ({ref.year}) "
+                             f"{ref.title}. {ref.journal}.{doi}{pmid}")
+        installed = entry.missing_databases(root)
+        if installed:
+            lines.append(f"{'':2s}not present in this copy: {', '.join(installed)}")
+        lines.append("")
+    return lines
+
+
+def _wrap(text: str, width: int) -> list[str]:
+    import textwrap  # noqa: PLC0415
+
+    return textwrap.wrap(" ".join(str(text).split()), width=width) or [""]
 
 
 def require_core(store: DatabaseStore) -> None:

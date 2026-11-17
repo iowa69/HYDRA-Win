@@ -1,6 +1,6 @@
 """HYDRA-Win: a portable Windows front end for the Hydra bacterial genome analyser."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 #: The name users see: window title, executable, workbooks, README.
 APP_NAME = "HYDRA-Win"

@@ -16,7 +16,10 @@
                                     window at each step and assert the results
 
 Test genomes are public NCBI RefSeq assemblies downloaded at run time:
-K. pneumoniae HS11286 (ST11, KPC-2) and E. coli EC958 (ST131, CTX-M-15).
+K. pneumoniae HS11286 (ST11, KPC-2), E. coli EC958 (ST131, CTX-M-15) and
+S. aureus USA300 FPR3757 (ST8/CC8, spa t008, SCCmec IVa, PVL+). The last two
+are organisms whose typing data is bundled in the zip, so the offline run has
+to produce real organism-specific calls for them.
 """
 
 from __future__ import annotations
@@ -49,6 +52,8 @@ GENOMES = {
                "GCF_000240185.1_ASM24018v2/GCF_000240185.1_ASM24018v2_genomic.fna.gz",
     "EC958": "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/285/655/"
              "GCF_000285655.3_EC958.v1/GCF_000285655.3_EC958.v1_genomic.fna.gz",
+    "USA300": "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/013/465/"
+              "GCF_000013465.1_ASM1346v1/GCF_000013465.1_ASM1346v1_genomic.fna.gz",
 }
 #: What the literature says these two genomes carry.
 #: Point mutations and disruptions are the ones AMRFinderPlus 4.2.7 (database
@@ -58,17 +63,62 @@ EXPECT = {
                 "genes": ["blaKPC-2", "blaCTX-M-14"],
                 "mutations": ["gyrA_S83I", "parC_S80I", "ompK35_G134AfsTer11",
                               "cirA_N467MfsTer15"],
-                "matrix": {"gyrA": "S83I", "ompK35": "G134AfsTer11"}},
+                "matrix": {"gyrA": "S83I", "ompK35": "G134AfsTer11"},
+                # No organism typing module covers Klebsiella: its lineage
+                # schemes are the Kleborate ones, which the Typing sheet
+                # already carried before the modules existed.
+                "organism_typing": {}},
     "EC958": {"species": "Escherichia coli", "typing": {"ST achtman": "131"},
               "genes": ["blaCTX-M-15", "blaOXA-1"],
               "mutations": ["gyrA_S83L", "gyrA_D87N", "parC_S80I", "parC_E84V", "parE_I529L",
                             "ptsI_V25I", "uhpT_E350Q"],
-              "matrix": {"gyrA": "S83L; D87N"}},
+              "matrix": {"gyrA": "S83L; D87N"},
+              # EC958 is the reference ST131-H30Rx uropathogen (Totsika 2011,
+              # Forde 2014): phylogroup B2, fimH30, ExPEC by the marker rule,
+              # and no Shiga toxin.
+              "organism_typing": {
+                  "Phylogroup (Clermont)": "B2",
+                  "fimH allele (FimTyper)": "fimH30",
+                  "Pathotype": "ExPEC",
+                  "Shiga toxin subtype": "none detected",
+                  "Shigella / EIEC cluster": "not Shigella/EIEC"},
+              "offline_typing": {
+                  "Phylogroup (Clermont)": "B2",
+                  "fimH allele (FimTyper)": "fimH30",
+                  "Pathotype": "ExPEC"},
+              "headline": "ExPEC \u00b7 phylogroup B2"},
+    "USA300": {"species": "Staphylococcus aureus", "st": "8",
+               "genes": ["mecA", "blaZ"],
+               "mutations": [],
+               "matrix": {},
+               # USA300 FPR3757 (Diep 2006): ST8/CC8, spa t008, agr group I,
+               # PVL positive, capsule serotype 5, immune evasion cluster type
+               # B, ACME present, hlb interrupted by the Sa3int prophage.
+               "organism_typing": {
+                   "spa type (Ridom)": "t008",
+                   "MLST clonal complex": "CC8",
+                   "agr group": "I",
+                   "Panton-Valentine leucocidin (lukS/lukF-PV)": "positive",
+                   "Capsule serotype (cap locus)": "5",
+                   "Immune evasion cluster (IEC type)": "type B",
+                   "Toxic shock toxin (tst)": "negative"},
+               # Everything except spa, whose database is a first-launch
+               # download (the Ridom policy).
+               "offline_typing": {
+                   "MLST clonal complex": "CC8",
+                   "agr group": "I",
+                   "Panton-Valentine leucocidin (lukS/lukF-PV)": "positive",
+                   "Capsule serotype (cap locus)": "5",
+                   "Immune evasion cluster (IEC type)": "type B",
+                   "Arginine catabolic mobile element": "arc cluster present"},
+               "headline": "spa t008 \u00b7 CC8 \u00b7 agr I"},
 }
 GENOME_SHEETS = ("Summary", "AMR_genes", "Point_mutations", "Virulence", "Plasmids",
                  "Typing", "All_hits", "Pivot")
 CUMULATIVE_SHEETS = ("Summary", "AMR_matrix", "Mutations_matrix", "Virulence_matrix",
-                     "Plasmids_matrix", "All_hits")
+                     "Plasmids_matrix", "Typing_matrix", "All_hits")
+#: Where the Typing sheet's header row sits (title and explanation above it).
+TYPING_HEADER_ROW = 4
 
 
 def log(message: str) -> None:
@@ -233,7 +283,9 @@ def fetch_genomes(folder: Path) -> list[Path]:
     with gzip.open(ec_gz, "rb") as src, open(ec, "wb") as dst:
         shutil.copyfileobj(src, dst)
     ec_gz.unlink()
-    return [hs, ec]
+    # Gzipped on purpose, like HS11286: both input forms stay exercised.
+    sa = download(GENOMES["USA300"], folder / "USA300.fna.gz")
+    return [hs, ec, sa]
 
 
 def genome_files(folder: Path) -> dict[str, Path]:
@@ -296,11 +348,8 @@ def assert_outputs(out: Path, genomes: dict[str, Path] | None = None) -> list[st
         if "st" in expect and str(summary.get("MLST ST")) != expect["st"]:
             problems.append(f"{genome}: MLST ST {summary.get('MLST ST')!r}, "
                             f"expected {expect['st']}")
-        typing = {r["Scheme / database"]: r["Call"] for r in _rows(wb["Typing"])}
-        for scheme, call in expect.get("typing", {}).items():
-            if str(typing.get(scheme)) != call:
-                problems.append(f"{genome}: typing {scheme} {typing.get(scheme)!r}, "
-                                f"expected {call}")
+        problems += check_typing_sheet(genome, wb, expect,
+                                       expect.get("organism_typing", {}))
         if wb["Pivot"].max_row < 7:
             problems.append(f"{genome}: Pivot sheet has no loci")
         log(f"{genome}: {len(hits)} hits, {len(amr)} AMR rows, species "
@@ -333,6 +382,56 @@ def assert_outputs(out: Path, genomes: dict[str, Path] | None = None) -> list[st
             if not long or {r["Assembly"] for r in long} != set(EXPECT):
                 problems.append("cumulative All_hits does not cover both assemblies")
             log(f"cumulative: {len(long)} hits")
+    return problems
+
+
+def check_typing_sheet(genome: str, wb, expect: dict, wanted: dict) -> list[str]:
+    """The Typing sheet must name every call, its evidence and its caveats.
+
+    The whole reason the modules were written is that a gene name without the
+    evidence behind it was useless, so an empty evidence or caveats cell on an
+    organism call is a failure, not a cosmetic problem.
+    """
+    problems: list[str] = []
+    rows = _rows(wb["Typing"], header_row=TYPING_HEADER_ROW)
+    if not rows:
+        return [f"{genome}: Typing sheet is empty"]
+    calls = {r["Scheme / database"]: r for r in rows}
+    for scheme, call in expect.get("typing", {}).items():
+        if str(calls.get(scheme, {}).get("Call")) != call:
+            problems.append(f"{genome}: typing {scheme} "
+                            f"{calls.get(scheme, {}).get('Call')!r}, expected {call}")
+    organism_rows = [r for r in rows if r["Type"] == "Organism typing"]
+    if wanted and not organism_rows:
+        problems.append(f"{genome}: no organism typing rows, expected "
+                        f"{sorted(wanted)}")
+    for scheme, call in wanted.items():
+        row = calls.get(scheme)
+        if row is None:
+            problems.append(f"{genome}: organism typing has no {scheme!r} row "
+                            f"(rows: {sorted(calls)})")
+            continue
+        if str(row["Call"]) != call:
+            problems.append(f"{genome}: {scheme} = {row['Call']!r}, expected {call!r}")
+    for row in organism_rows:
+        if not row.get("Organism"):
+            problems.append(f"{genome}: {row['Scheme / database']} names no organism")
+        if not row.get("Evidence: what the call rests on"):
+            problems.append(f"{genome}: {row['Scheme / database']} has no evidence")
+        if not row.get("Caveats, limits and what could not be determined"):
+            problems.append(f"{genome}: {row['Scheme / database']} has no caveat text")
+    headline = str(wb["Typing"].cell(row=1, column=1).value or "")
+    if "headline" in expect and expect["headline"] not in headline:
+        problems.append(f"{genome}: Typing sheet title {headline!r} does not carry "
+                        f"the headline {expect['headline']!r}")
+    summary = {r[0]: r[1] for r in wb["Summary"].iter_rows(values_only=True) if r[0]}
+    if wanted:
+        shown = {str(v) for v in summary.values()}
+        for call in wanted.values():
+            if not any(call in text for text in shown):
+                problems.append(f"{genome}: Summary sheet never mentions {call!r}")
+    log(f"{genome}: {len(organism_rows)} organism typing rows, "
+        f"headline {headline.split(' - ', 1)[-1]!r}")
     return problems
 
 
@@ -372,13 +471,64 @@ def cmd_smoke(zip_path: Path, work: Path) -> None:
         raise SystemExit(f"{len(problems)} smoke-test problem(s)")
     log("smoke test passed")
     smoke_settings(app, genomes[0], work)
-    smoke_offline(zip_path, work, genomes[1])
+    # The offline run gets the S. aureus genome: its typing data is bundled
+    # except for the Ridom spa database, so it is the case that proves both
+    # halves of the licence policy at once.
+    smoke_offline(zip_path, work, genomes[2])
 
 
 #: What the zip itself must hold, and what only a first-launch download provides.
 BUNDLED = {"protein", "ncbi", "resfinder", "plasmidfinder", "sccmec", "lineage", "species",
            "vfdb", "argannot", "megares", "ecoli_vf", "ecoh"}
 DOWNLOADED = {"pubmlst", "card"}
+
+#: Organism typing data the zip carries, and what the module can still do
+#: without the part it does not carry. One entry per upstream module, because a
+#: module silently dropped from the build would otherwise go unnoticed.
+ORGANISM_BUNDLED = {"typing-saureus", "typing-spyogenes", "typing-sagalactiae",
+                    "typing-spneumoniae", "typing-hinfluenzae", "typing-salmonella",
+                    "typing-ecoli"}
+#: Not a single file of these may be in the zip: all PubMLST nomenclature data.
+ORGANISM_DOWNLOADED = {"typing-nmeningitidis"}
+#: Bundled, but deliberately incomplete: these databases are the ones a licence
+#: withholds, and the zip must not contain them.
+ORGANISM_PARTIAL = {
+    "typing-saureus": {"spa"},            # Ridom: non-commercial, no copies
+    "typing-hinfluenzae": {"cap", "mlst"},  # hicap GPL-3.0; PubMLST
+    "typing-ecoli": {"shigeifinder"},     # ShigEiFinder GPL-3.0
+}
+
+
+def check_organism_bundle(status: dict) -> list[str]:
+    """What organism typing data a fresh unzip holds, and what it must not hold.
+
+    The licence decision is only real if the files a licence withholds are
+    genuinely absent from the zip, so this asserts their absence as firmly as
+    it asserts the presence of the rest.
+    """
+    problems: list[str] = []
+    rows = {row["name"]: row for row in status.get("organism_typing", [])}
+    if not rows:
+        return ["--db-status reports no organism typing data at all"]
+    installed = {name for name, row in rows.items() if row["installed"]}
+    if installed != ORGANISM_BUNDLED:
+        problems.append(f"fresh unzip organism typing: installed {sorted(installed)}, "
+                        f"expected {sorted(ORGANISM_BUNDLED)}")
+    for name in ORGANISM_DOWNLOADED:
+        row = rows.get(name, {})
+        if row.get("installed"):
+            problems.append(f"{name} is in the zip; every one of its databases is "
+                            f"PubMLST data and must be downloaded instead")
+    for name, withheld in ORGANISM_PARTIAL.items():
+        row = rows.get(name, {})
+        present = set(row.get("missing") or [])
+        if present != withheld:
+            problems.append(f"{name}: the zip withholds {sorted(present)}, "
+                            f"expected exactly {sorted(withheld)}")
+    log("fresh unzip organism typing: "
+        + "; ".join(f"{n} ({'complete' if not rows[n]['missing'] else 'without ' + ', '.join(rows[n]['missing'])})"
+                    for n in sorted(installed)))
+    return problems
 
 
 def smoke_offline(zip_path: Path, work: Path, genome: Path) -> None:
@@ -405,6 +555,7 @@ def smoke_offline(zip_path: Path, work: Path, genome: Path) -> None:
     missing = {d["name"] for d in status["databases"] if not d["installed"]}
     if installed != BUNDLED or missing != DOWNLOADED:
         problems.append(f"fresh unzip: installed {sorted(installed)}, missing {sorted(missing)}")
+    problems += check_organism_bundle(status)
     out = work / "results offline"
     shutil.rmtree(out, ignore_errors=True)
     log_file = work / "smoke-offline.log"
@@ -436,11 +587,39 @@ def smoke_offline(zip_path: Path, work: Path, genome: Path) -> None:
         problems.append("offline run reported CARD hits without CARD")
     checked, found = verify(book, genome)
     problems += [f"offline: {p}" for p in found]
+    # The organism typing the bundled data can do with no network at all.
+    wanted_typing = EXPECT[name].get("offline_typing", {})
+    problems += check_typing_sheet(f"offline {name}", wb, {}, wanted_typing)
+    rows = _rows(wb["Typing"], header_row=TYPING_HEADER_ROW)
+    by_scheme = {r["Scheme / database"]: r for r in rows}
+    # ... and the one call whose database the zip may not carry must say so
+    # rather than read as a negative.
+    withheld = {"USA300": ("spa type (Ridom)", "spa"),
+                "EC958": ("Shigella / EIEC cluster", "ShigEiFinder")}.get(name)
+    if withheld:
+        scheme, what = withheld
+        row = by_scheme.get(scheme)
+        if row is None:
+            problems.append(f"offline {name}: no {scheme!r} row at all; a withheld "
+                            f"database must still be reported")
+        else:
+            call = str(row["Call"])
+            caveat = str(row["Caveats, limits and what could not be determined"] or "")
+            if not call.startswith("not determined"):
+                problems.append(f"offline {name}: {scheme} reads {call!r}; without the "
+                                f"{what} database it must read 'not determined'")
+            elif not caveat:
+                problems.append(f"offline {name}: {scheme} is 'not determined' with no "
+                                f"reason given, which reads as a negative result")
     text = log_file.read_text(encoding="utf-8", errors="replace")
     if "not performed (pubmlst missing)" not in text:
         problems.append("the offline log does not say MLST was not performed")
+    if "organism typing available for" not in text:
+        problems.append("the offline log does not say which organism typing is available")
     log(f"offline: {len(installed)} bundled databases, missing {sorted(missing)}; "
-        f"hits from {sorted(used)}; {checked} mutation rows verified")
+        f"hits from {sorted(used)}; {checked} mutation rows verified; "
+        f"{len([r for r in rows if r['Type'] == 'Organism typing'])} organism "
+        f"typing calls")
     for problem in problems:
         log(f"PROBLEM: {problem}")
     if problems:
@@ -622,10 +801,22 @@ def cmd_gui_smoke(work: Path) -> None:
         if row.get("status") != "Done" or row.get("species") != expect["species"] \
                 or not row.get("amr", "").isdigit():
             problems.append(f"table row for {genome}: {row}")
+        # The headline organism call has to reach the window's table, not just
+        # the workbook: it is the first thing anyone reads.
+        shown = row.get("typing", "")
+        if "headline" in expect:
+            if shown != expect["headline"]:
+                problems.append(f"{genome}: the table's Organism typing cell reads "
+                                f"{shown!r}, expected {expect['headline']!r}")
+        elif shown != "no module for this species":
+            problems.append(f"{genome}: the table's Organism typing cell reads "
+                            f"{shown!r}; no module covers this species, which the "
+                            f"cell must say rather than leave blank")
     if "st" in EXPECT["HS11286"] and not rows.get("HS11286", {}).get("mlst", "").startswith(
             "ST" + EXPECT["HS11286"]["st"]):
         problems.append(f"HS11286 MLST cell {rows.get('HS11286', {}).get('mlst')!r}")
-    if not finished.get("status", "").startswith("Finished: 2 of 2 genomes analysed"):
+    if not finished.get("status", "").startswith(
+            f"Finished: {len(EXPECT)} of {len(EXPECT)} genomes analysed"):
         problems.append(f"status line {finished.get('status')!r}")
     problems += assert_outputs(out, genome_files(work / "genomes ö dir"))
     cli_out = work / "smoke-results"
@@ -646,7 +837,12 @@ def cmd_gui_smoke(work: Path) -> None:
             or screen.get("log_bottom", 10 ** 6) > bottom:
         problems.append("the window or its log does not fit on the screen")
     dbs = data.get("databases", {})
-    if len(dbs.get("rows", [])) != 14 or not all(r["installed"] for r in dbs.get("rows", [])):
+    # 14 gene/typing databases plus one row per organism typing module. The
+    # N. meningitidis row is the only one that is not installed: every one of
+    # its databases is PubMLST data, and the --fetch-db step at the start of
+    # the smoke test installs it, so by now even that one is present.
+    rows_shown = dbs.get("rows", [])
+    if len(rows_shown) != 14 + 8 or not all(r["installed"] for r in rows_shown):
         problems.append(f"Databases dialog: {dbs}")
     wanted = ["1-empty", "2-genomes-loaded", "3-settings-open", "4-fastq-notice", "5-running",
               "6-finished", "7-databases"]

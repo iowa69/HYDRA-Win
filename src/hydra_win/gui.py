@@ -56,6 +56,7 @@ COLUMNS = (  # id, heading, width (in average characters), anchor, stretch
     ("status", "Status", 12, "w", False),
     ("species", "Species", 21, "w", True),
     ("mlst", "MLST", 16, "w", False),
+    ("typing", "Organism typing", 26, "w", True),
     ("amr", "AMR genes", 13, "center", False),
     ("mutations", "Mutations", 12, "center", False),
 )
@@ -710,8 +711,8 @@ class App:
             head = state.get("headline") or {}
             self.tree.insert("", "end", iid=iid, tags=tags, values=(
                 genome.name, genome.path.name, shown, state.get("status", "Ready"),
-                head.get("species", ""), head.get("mlst", ""), head.get("amr", ""),
-                head.get("mutations", "")))
+                head.get("species", ""), head.get("mlst", ""), head.get("typing", ""),
+                head.get("amr", ""), head.get("mutations", "")))
         keep = [iid for iid in selection if self.tree.exists(iid)]
         if keep:
             self.tree.selection_set(keep)
@@ -802,7 +803,8 @@ class App:
 
         from . import databases, runtime  # noqa: PLC0415
 
-        return databases.status(DatabaseStore(runtime.prepare().db_root))
+        store = DatabaseStore(runtime.prepare().db_root)
+        return databases.status(store) + databases.organism_status(store)
 
     def refresh_db_status(self) -> list[dict]:
         """Update the status line under the log from the database folder."""
@@ -943,7 +945,8 @@ class App:
         head = current.get("headline") or {}
         values = list(self.tree.item(iid, "values"))
         values[3] = current.get("status", "")
-        values[4:8] = [head.get("species", ""), head.get("mlst", ""), head.get("amr", ""),
+        values[4:9] = [head.get("species", ""), head.get("mlst", ""),
+                       head.get("typing", ""), head.get("amr", ""),
                        head.get("mutations", "")]
         tags = [current.get("tag", "ready")] + (["renamed"] if genome.renamed else [])
         self.tree.item(iid, values=values, tags=tags)
@@ -1087,10 +1090,13 @@ class DatabasesDialog:
             anchor="w")
         tk.Label(body, font=f["small"], bg=C["card"], fg=C["muted"], justify="left",
                  wraplength=int(760 * s),
-                 text="Twelve databases ship inside the zip. PubMLST and CARD do not allow "
-                      "redistribution, so they are downloaded on this PC the first time "
-                      "HYDRA-Win starts. If that fails (proxy, firewall), Retry, or copy the "
-                      "'db' folder from a PC where it worked and use Import from folder."
+                 text="Twelve gene databases and the organism typing data for seven of the "
+                      "eight organisms ship inside the zip. What a licence does not let the "
+                      "zip carry - PubMLST, CARD, the Ridom spa database, hicap's cap "
+                      "database, ShigEiFinder and the N. meningitidis data - is downloaded "
+                      "on this PC the first time HYDRA-Win starts. If that fails (proxy, "
+                      "firewall), Retry, or copy the 'db' folder from a PC where it worked "
+                      "and use Import from folder."
                  ).pack(anchor="w", pady=(2, int(10 * s)))
         frame = tk.Frame(body, bg=C["border"])
         frame.pack(fill="both", expand=True)
@@ -1128,6 +1134,9 @@ class DatabasesDialog:
 
     @staticmethod
     def status_text(row: dict) -> str:
+        if row.get("missing") and row["installed"]:
+            return (f"installed, except {', '.join(row['missing'])} "
+                    f"(downloaded on this PC): {row.get('offline', '')}")
         if row["installed"]:
             version = row.get("version") or ""
             when = (row.get("installed_on") or "")[:10]
@@ -1140,7 +1149,10 @@ class DatabasesDialog:
         self.rows = rows
         self.tree.delete(*self.tree.get_children())
         for row in rows:
-            route = "Bundled in the zip" if row["route"] == "bundled" else "Downloaded on this PC"
+            route = {"bundled": "Bundled in the zip",
+                     "first launch": "Downloaded on this PC",
+                     "bundled + first launch": "Zip, part downloaded"}.get(
+                         row["route"], "Downloaded on this PC")
             self.tree.insert("", "end", values=(row["title"], route, self.status_text(row)),
                              tags=("missing",) if not row["installed"] else ())
         missing = [r for r in rows if not r["installed"]]

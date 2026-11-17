@@ -127,10 +127,14 @@ def test_genome_workbook(tmp_path):
     assert [r["Gene"] for r in _table(wb["Virulence"])] == ["ybtS"]
     assert [r["Gene"] for r in _table(wb["Plasmids"])] == ["IncFIB(K)_1"]
 
-    typing = _table(wb["Typing"])
+    typing = _table(wb["Typing"], header_row=excel.TYPING_HEADER_ROW)
     kinds = {r["Type"] for r in typing}
     assert {"Species", "MLST", "Lineage / element typing", "Serotype locus"} <= kinds
     assert next(r for r in typing if r["Type"] == "MLST")["Call"] == "11"
+    ybst = next(r for r in typing if r["Scheme / database"] == "klebsiella ybst")
+    assert ybst["Call"] == "15"
+    assert ybst["Lineage / detail"] == "ybt 9"
+    assert ybst["Organism"] == excel.ANY_ORGANISM
 
     all_hits = _table(wb["All_hits"])
     assert len(all_hits) == 7

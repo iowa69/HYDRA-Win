@@ -188,7 +188,9 @@ def main(argv: list[str] | None = None) -> int:
                                "home": str(rt.home), "blast_cwd": str(rt.blast_cwd),
                                "db_root": str(rt.db_root), "blast_dir": str(rt.blast_dir),
                                "network": netfetch.environment(),
-                               "databases": rows}, indent=2)
+                               "databases": rows,
+                               "organism_typing": databases.organism_status(
+                                   DatabaseStore(rt.db_root))}, indent=2)
             if args.db_status == "-":
                 print(text)
             else:

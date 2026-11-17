@@ -430,13 +430,28 @@ def ensure_databases(progress: ProgressFn | None = None, offline: bool = False) 
         reused = databases.adopt(store, todo, [r for r in runtime.legacy_db_roots()
                                                if r != rt.db_root])
         todo = [name for name in todo if name not in reused]
-    if not todo:
+    organism_todo = databases.organism_missing(store)
+    if not todo and not organism_todo:
         return {}
     if offline:
-        LOG.warning("offline mode: not downloading %s", ", ".join(todo))
-        return {name: "offline" for name in todo}
-    LOG.info("first launch: downloading %d database(s): %s", len(todo), ", ".join(todo))
-    return databases.install(store, todo, progress=progress)
+        skipped = todo + [f"typing-{k}" for k in organism_todo]
+        LOG.warning("offline mode: not downloading %s", ", ".join(skipped))
+        return {name: "offline" for name in skipped}
+    failures: dict[str, str] = {}
+    if todo:
+        LOG.info("first launch: downloading %d database(s): %s",
+                 len(todo), ", ".join(todo))
+        failures.update(databases.install(store, todo, progress=progress))
+    if organism_todo:
+        # The organism typing data the zip may not carry: the Ridom spa
+        # database, hicap's GPL-3.0 cap set, ShigEiFinder, and every PubMLST
+        # set. Each module fetches and verifies its own.
+        LOG.info("first launch: downloading organism typing data for %s",
+                 ", ".join(organism_todo))
+        failures.update({f"typing-{k}": reason for k, reason in
+                         databases.install_organisms(store, organism_todo,
+                                                     progress=progress).items()})
+    return failures
 
 
 def _run_info(store: DatabaseStore, used: Sequence[str], missing: Sequence[str],
@@ -539,6 +554,19 @@ def _analyse(rt, inputs, outdir: Path, cumulative: bool, settings: Settings, off
         for name, impact in databases.missing_analyses(store).items():
             LOG.warning("not performed (%s missing): %s", name, impact)
     LOG.info("screening against: %s", ", ".join(used))
+    organism_rows = databases.organism_status(store)
+    ready = [r["title"] for r in organism_rows if r["installed"] and not r["missing"]]
+    partial = [f"{r['title']} (without {', '.join(r['missing'])})"
+               for r in organism_rows if r["installed"] and r["missing"]]
+    absent = [r["title"] for r in organism_rows if not r["installed"]]
+    LOG.info("organism typing available for: %s", ", ".join(ready) or "nothing")
+    if partial:
+        LOG.info("organism typing partly available: %s; the calls that need the "
+                 "missing data read 'not determined'", "; ".join(partial))
+    if absent:
+        # Not a warning: it only matters if a genome in this run is that
+        # organism, and the pipeline records that against the sample itself.
+        LOG.info("organism typing data not installed for: %s", ", ".join(absent))
 
     config = Config(db_dir=rt.db_root, threads=settings.resolved_threads(), plus=True,
                     auto_organism=True, keep_temp=keep_temp, thresholds=settings.thresholds())
@@ -595,6 +623,9 @@ def _analyse(rt, inputs, outdir: Path, cumulative: bool, settings: Settings, off
                      result.mlst.scheme, result.mlst.sequence_type, len(primary))
             LOG.info("%s: point mutations / disruptions: %s", result.sample,
                      "; ".join(excel.mutation_lines(result)) or "none")
+            LOG.info("%s: organism typing: %s", result.sample,
+                     excel.typing_headline(result) or "no organism module applies "
+                     "to this species")
             notify(GenomeEvent(genome, "done", fraction=1.0, result=result, workbook=path))
     finally:
         if not keep_temp:

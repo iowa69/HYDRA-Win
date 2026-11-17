@@ -69,8 +69,9 @@ reason the download failed, with **Retry download** and **Import from folder…*
 
 <p align="center"><img src="docs/screenshots/06-genome-pivot.png" alt="Pivot sheet of one genome" width="900"></p>
 
-**Summary sheet:** species, MLST, scores, typing and counts for one genome, and each
-point mutation or gene disruption in one plain sentence.
+**Summary sheet:** species, MLST, scores, the organism typing headline and every typing
+call, counts for one genome, and each point mutation or gene disruption in one plain
+sentence.
 
 <p align="center"><img src="docs/screenshots/02-genome-summary.png" alt="Summary sheet of one genome" width="720"></p>
 
@@ -87,7 +88,16 @@ point mutation or gene disruption in one plain sentence.
 
 <p align="center"><img src="docs/screenshots/05-genome-plasmids.png" alt="Plasmids sheet with replicons" width="900"></p>
 
-**Cumulative_results, Summary:** one row per assembly.
+**Typing sheet:** every typing call for one genome — here *S. aureus* USA300 FPR3757 —
+with the evidence the call rests on and its caveats on the same row. spa `t008`, *agr*
+group I, PVL positive, capsule serotype 5, immune evasion cluster type B, and *hlb*
+reported as interrupted by a Sa3int prophage with the 43 kb alignment gap that shows it
+(see [Organism-specific typing](#organism-specific-typing)).
+
+<p align="center"><img src="docs/screenshots/10-genome-typing.png" alt="Typing sheet with evidence and caveats for every call" width="900"></p>
+
+**Cumulative_results, Summary:** one row per assembly, with its headline organism
+typing.
 
 <p align="center"><img src="docs/screenshots/07-cumulative-summary.png" alt="Cumulative summary, one row per assembly" width="900"></p>
 
@@ -99,6 +109,12 @@ point mutation or gene disruption in one plain sentence.
 the change the assembly carries, with the resistance above each gene.
 
 <p align="center"><img src="docs/screenshots/09-cumulative-mutations-matrix.png" alt="Cumulative point-mutation matrix" width="720"></p>
+
+**Cumulative_results, Typing matrix:** assemblies against typing schemes, the organism
+above each column and the headline calls in column D — a whole batch compared at a
+glance.
+
+<p align="center"><img src="docs/screenshots/11-cumulative-typing-matrix.png" alt="Cumulative typing matrix" width="900"></p>
 
 ## Get started
 
@@ -230,7 +246,7 @@ For each genome, `<results>\<genome>\<genome>.xlsx` contains these sheets:
 | `Point_mutations` | Resistance point mutations and gene disruptions: what changed, where and what it means first, then the raw hit columns (see below) |
 | `Virulence` | Virulence factor hits |
 | `Plasmids` | Plasmid replicon hits |
-| `Typing` | Species call, MLST, every lineage/serotype/element scheme, and serotype loci |
+| `Typing` | Every typing call for this genome: the species, MLST, the organism-specific schemes grouped by organism, the lineage/element schemes and the serotype loci. Each row carries **the evidence the call rests on** (alleles, residues, identity and coverage, contig coordinates, database version) and **its caveats** (what is provisional, what disagreed, what could not be determined). See [Organism-specific typing](#organism-specific-typing) |
 | `All_hits` | Every hit in every category; mutation calls carry a one-line *Mutation: what changed* |
 | `Pivot` | One row per locus, grouped by category and drug class, with one column per database. Each cell holds that database's % identity and is colour-coded; for a mutation it holds the change itself (`S83I`, `G134AfsTer11`) |
 
@@ -291,31 +307,98 @@ resolved*, then the raw hit columns.
 * Anything that cannot be resolved to a codon (a position in an alignment gap, a codon
   past a contig end, a mosaic allele) says so in *Not resolved*.
 
+### Organism-specific typing
+
+Once the species is known, HYDRA-Win applies the typing a clinical or public-health
+laboratory actually reports for that organism. Nothing has to be chosen: the species
+call selects the schemes, and the MLST scheme selects them when there is no species
+call.
+
+| Organism | What is typed | Works with no internet |
+| --- | --- | --- |
+| *Staphylococcus aureus* | spa type (Ridom), *agr* group, MLST clonal complex, SCCmec, Panton-Valentine leucocidin, *tst*, enterotoxin and haemolysin repertoires, *hlb* status (and the Sa3int prophage that interrupts it), capsule serotype locus, immune evasion cluster type, ACME, *blaZ* operon | everything **except the spa type** |
+| *Streptococcus pyogenes* | emm type and emm cluster with its tissue tropism, virulence and superantigen repertoire, prophage content, regulatory loci, adhesins | everything |
+| *Streptococcus agalactiae* | capsular serotype, alpha-like protein (Alp) type, surface proteins, pilus island type, marker genes, PBP2X substitutions | everything |
+| *Streptococcus pneumoniae* | capsular serotype, PBP type (1A:2B:2X) with the CDC reference MIC where that triplet is in the reference table, macrolide/lincosamide/tetracycline/fluoroquinolone determinants, pilus islets | everything |
+| *Haemophilus influenzae* | capsule type (*cap* locus), PBP3 (*ftsI*) substitution pattern and rPBP3 group, β-lactam interpretation, MLST | the **PBP3 pattern and the β-lactam interpretation**; the capsule type and the ST need the first-launch download |
+| *Neisseria meningitidis* | capsule serogroup, fine type, Bexsero antigen sequence type (BAST), MLST and clonal complex, resistance target alleles | **nothing**: all of its data is PubMLST nomenclature and is downloaded on first launch |
+| *Salmonella enterica* | serovar from the antigenic formula, subspecies, H2 (*fljB*) locus, pathogenicity islands, virulence plasmid, typhoidal markers, ST and eBurst group | everything |
+| *Escherichia coli* and *Shigella* | phylogroup (Clermont), *fimH* allele, ST131 subclone, Shiga toxin subtype, pathotype, intimin (*eae*) subtype, ExPEC/UPEC virulence panel | everything **except the *Shigella*/EIEC cluster call** |
+
+Each call is reported with the evidence it rests on and with its caveats, on its own row
+of the `Typing` sheet. For example, *S. aureus* USA300 FPR3757:
+
+| Scheme | Call | Evidence | Caveats |
+| --- | --- | --- | --- |
+| spa type (Ridom) | `t008` | `repeat_succession = 11-19-12-21-17-34-24-34-22-25`, `repeats = 10`, `region = NC_007793.1:128391-128785 (395 bp)` | spa types are tandem arrays and short-read assemblies lose repeats in about 1-15% of isolates depending on the assembler (Mollerup 2022), so confirm before acting on a single-repeat difference |
+| β-haemolysin (*hlb*) status | `disrupted by prophage integration` | `hlb = 100.0% identity over 1-993/993`, `alignments = 2`, `contig_gap_bp = 43036` | the two alignment pieces are 43 kb apart with the break at base 183 of 993: the signature of a β-haemolysin-converting (Sa3int) prophage inside *hlb*. β-haemolysin is therefore not produced, despite *hlb* being 100% covered |
+| MLST clonal complex | `CC8` | `ST = 8`, `profile = 3-3-1-1-4-4-3`, `nearest_founders = CC8 (7/7), CC239 (6/7), CC9 (4/7)` | ST8 is the founder of CC8 (7/7 loci shared) |
+
+The headline calls (`spa t008 · CC8 · agr I`) are in the **Organism typing** column of
+the window's table, in the title of the `Typing` sheet, in the genome `Summary` sheet
+and in the cumulative `Summary` and `Typing_matrix` sheets.
+
+**The honest limits**
+
+* **"Not determined" is never a negative result.** Every undetermined call says why: a
+  database that is not installed, a locus that reaches a contig end, a profile that is
+  incomplete, an allele newer than the data. Undetermined calls are coloured in the
+  `Typing` sheet so they cannot be skimmed past.
+* **Everything is read from the assembly.** A scheme that needs reads is not attempted.
+  Repeat arrays (*spa*) and long loci (*cap*, *cps*, SCCmec) can be collapsed or split
+  by a short-read assembler, which the caveats say for each affected call.
+* **A locus that is present is not a locus that is expressed.** USA300 carries an intact
+  *cap5* locus and does not make capsule; the caveat says so.
+* **Where a call depends on the ST, it says so.** The *E. coli* ST131 subclone label
+  (H30) is only meaningful if the Achtman ST is 131, which the row states.
+* **PubMLST data is fetched anonymously and no API key is ever used.** Anonymous access
+  returns only data submitted on or before 31 December 2024, which PubMLST's terms allow
+  to be redistributed. A sequence type assigned after that date therefore reads *not
+  determined*, with that reason, instead of being guessed.
+* **No MIC is predicted unless a reference laboratory published the value.** The
+  pneumococcal PBP type gives the CDC reference MIC only for a 1A:2B:2X triplet that is
+  in the CDC table, and declines otherwise. The nearest-neighbour mode-MIC model was
+  looked up and deliberately not built: in its own validation it gave very major error
+  rates above 50% for three of six β-lactams, meaning resistant isolates called
+  susceptible.
+* **Marker rules are screens, not diagnoses.** An ExPEC or UPEC genotype says what the
+  isolate could do, not where it was grown or what it caused.
+* **Group C/G streptococci are not group A.** The CDC emm database also holds the
+  `stG`/`stC`/`stL` types of *S. dysgalactiae*. A *S. dysgalactiae* isolate is not put
+  through the *S. pyogenes* module, and if one of those records is the best match in a
+  genome called as *S. pyogenes*, the heading says *S. dysgalactiae* rather than "emm
+  type" so it cannot be read as a group A type.
+* Full method, thresholds, provenance, validation tables and bibliography for every
+  scheme are in upstream Hydra's
+  [`docs/typing/`](https://github.com/iowa69/hydra/tree/typing-integration/docs/typing).
+
 With **Cumulative_results** (and two or more genomes), `<results>\Cumulative_results.xlsx`
 contains:
 
 | Sheet | Contents |
 | --- | --- |
-| `Summary` | One row per assembly, with each mutation and its resistance |
+| `Summary` | One row per assembly: the headline organism typing, every typing call, each mutation and its resistance |
 | `AMR_matrix` | Assembly × gene matrix of primary calls, colour-coded by identity, with the drug class above each gene |
 | `Mutations_matrix` | Assembly × gene; each cell states the change(s) the assembly carries (`S83L; D87N`, `G134AfsTer11`), with the resistance above each gene |
 | `Virulence_matrix` | Same layout, for virulence genes |
 | `Plasmids_matrix` | Same layout, for plasmid replicons |
+| `Typing_matrix` | Assembly × typing scheme, with the call in each cell and the organism above each column. The headline calls are in column D. A call that could not be made is coloured instead of left blank, and its caveat is the cell's comment |
 | `All_hits` | Every hit, with an `Assembly` column |
 
 ## What is (and isn't) included
 
 HYDRA-Win runs upstream Hydra's own analysis code. It uses a pinned copy of
-`hydra_amr` from [iowa69/hydra](https://github.com/iowa69/hydra) at commit `6d36c10`,
-with two small, documented Windows patches and the mutation-detail change proposed to
-upstream (see `src/hydra_amr/VENDORED.txt`). With Automatic settings, the calls match
-upstream's `--preset deep`:
+`hydra_amr` from [iowa69/hydra](https://github.com/iowa69/hydra) at commit `23c8fb0`
+(branch `typing-integration`, open as pull requests #2 and #3), with two small,
+documented Windows patches (see `src/hydra_amr/VENDORED.txt`). With Automatic settings,
+the calls match upstream's `--preset deep`:
 
 * every installed gene database
 * AMRFinderPlus translated search with `--plus` elements
 * point mutations
 * MLST
 * lineage and element typing
+* organism-specific typing for the species found
 * scores
 
 Two pieces are added for Windows:
@@ -343,7 +426,14 @@ Two pieces are added for Windows:
 * The species sketches cover Enterobacterales. Other genera are named from their MLST
   scheme, as in upstream.
 * PubMLST and CARD need an internet connection on the first launch, or a copy
-  imported from another PC.
+  imported from another PC. So do the *spa* type, the *H. influenzae* capsule, the
+  *Shigella*/EIEC cluster call and the whole *N. meningitidis* module (see
+  [Organism typing data](#organism-typing-data)). Everything else types offline.
+* Organism-specific typing covers the eight organisms in
+  [Organism-specific typing](#organism-specific-typing). Another species gets the
+  species call, MLST, the lineage and element schemes and the full gene, mutation,
+  virulence and plasmid analysis, and the **Organism typing** column says "no module for
+  this species" rather than leaving a blank that could be read as a negative.
 
 ## Databases
 
@@ -377,6 +467,37 @@ of them and want it removed from the zip, please
 [open an issue](https://github.com/iowa69/HYDRA-Win/issues) and it will go back to
 being a first-launch download.
 
+### Organism typing data
+
+One set per organism, built by the upstream module that uses it. The same policy
+decides the route, applied to the redistribution status each module's author recorded
+from the source's own words.
+
+| Organism typing data | How you get it | Licence / terms | Citation |
+| --- | --- | --- | --- |
+| *S. aureus* marker panel (NCBI RefSeq slices) and the PubMLST *S. aureus* profile table | in the zip | NCBI: public domain. PubMLST: data submitted on or before 31 December 2024 may be redistributed without restriction | Diep et al. 2006, Lancet 367:731; Enright et al. 2000, J Clin Microbiol 38:1008 |
+| Ridom SpaServer repeats and type table | downloaded on first launch | Ridom SpaServer policy: non-commercial use by individuals who download it themselves; "copies of the SpaServer database may not be used without permission to produce database driven web server or any other product or service" | Harmsen et al. 2003, J Clin Microbiol 41:5442 |
+| CDC emm database and the *S. pyogenes* RefSeq virulence panel | in the zip | CDC: "all materials on this site are in the public domain". NCBI: no copyright claimed | CDC *Streptococcus* Laboratory; O'Leary et al. 2016, Nucleic Acids Res 44:D733 |
+| GBS-SBG capsular references, CDC GBS surface-gene targets, the published *alp* alleles, the *S. agalactiae* RefSeq panel | in the zip | MIT (GBS-SBG). CDC surface targets: **the source states no licence**. NCBI: no copyright claimed | Tiruvayipati et al. 2021, Microb Genom 7:000688; Metcalf et al. 2017, Clin Microbiol Infect 23:574 |
+| Pneumococcal *cps* references and the CDC serotype, PBP and resistance probe sets with the reference PBP-type MIC table | in the zip | **the sources state no licence** | Bentley et al. 2006, PLoS Genet 2:e31; Metcalf et al. 2016, Clin Microbiol Infect 22:1002 |
+| *H. influenzae* PBP3 (*ftsI*) reference and the *blaTEM*/*blaROB* references | in the zip | NCBI: no licence attached | Skaare et al. 2014, Clin Microbiol Infect 20:O501 |
+| hicap *cap* database | downloaded on first launch | **GPL-3.0**: redistributable, but only under the GPL, so it is not mixed into this MIT zip | Watts & Holt 2019, J Clin Microbiol 57:e00190-19 |
+| *H. influenzae* and *N. meningitidis* PubMLST data (capsule, antigen peptides, MLST, resistance alleles) | downloaded on first launch | PubMLST terms restrict redistribution of data submitted after 2024-12-31 | Jolley, Bray & Maiden 2018, Wellcome Open Res 3:124 |
+| SISTR antigen alleles, the Grimont & Weill serovar table, the SPI references, *Salmonella* marker genes and the PubMLST *Salmonella* scheme | in the zip | Apache-2.0 (SISTR). NCBI: no copyright claimed. PubMLST: pre-2025 data, redistribution unrestricted | Yoshida et al. 2016, PLoS One 11:e0147101; Grimont & Weill 2007, WHO Collaborating Centre, Institut Pasteur |
+| FimTyper *fimH* alleles, NCBI StxTyper references, VirulenceFinder *E. coli* panel | in the zip | FimTyper and VirulenceFinder: **the sources state no licence**. StxTyper: US government work, public domain | Roer et al. 2017, J Clin Microbiol 55:2538; Malberg Tetzschner et al. 2020, J Clin Microbiol 58:e01269-20 |
+| ShigEiFinder cluster-specific genes | downloaded on first launch | **GPL-3.0**: redistributable, but only under the GPL, so it is not mixed into this MIT zip | Zhang et al. 2021, Microb Genom 7:000704 |
+
+Two of these are downloaded although their licence would permit redistribution:
+hicap's *cap* database and ShigEiFinder's gene sets are GPL-3.0, which is copyleft,
+and this zip is MIT. Downloading them on your own PC keeps the question from arising.
+
+The organism typing data adds about 34 MB to the zip. `db\DATABASES.txt` lists, for
+every one of these, the exact source URL, the version or retrieval date, the licence in
+the source's own words, the redistribution status the source states, and the citation.
+If you hold rights in any of them and want it removed from the zip, please
+[open an issue](https://github.com/iowa69/HYDRA-Win/issues) and it will become a
+first-launch download.
+
 The `db` folder in the zip contains `DATABASES.txt` and the licence texts.
 
 If a first-launch download fails, the analysis still runs with the other databases,
@@ -397,16 +518,22 @@ through these steps:
 3. BLAST+
 4. Database build with the packaged exe
 5. Zip
-6. Smoke test of the packaged exe: first launch, then `--cli --cumulative` on two public
-   NCBI genomes (*K. pneumoniae* HS11286 and *E. coli* EC958), with assertions on
-   sheets, hits, coordinates and known genes, and the point mutations and disruptions
-   AMRFinderPlus 4.2.7 reports for these genomes, under the same names. Every reported
-   codon is then re-read from the FASTA by an independent script
-   (`tools/verify_mutations.py`): it must encode the reported amino acid, and the
-   reference codon must differ from it exactly as the reported base change says. Then a
-   `--cli` run with custom thresholds and a folder of FASTQ files among the inputs, and a
-   fresh unzip run `--offline`: the twelve bundled databases must produce results and
-   PubMLST and CARD must be reported as missing, not as empty results
+6. Smoke test of the packaged exe: first launch, then `--cli --cumulative` on three
+   public NCBI genomes (*K. pneumoniae* HS11286, *E. coli* EC958 and *S. aureus* USA300
+   FPR3757), with assertions on sheets, hits, coordinates and known genes, and the point
+   mutations and disruptions AMRFinderPlus 4.2.7 reports for these genomes, under the
+   same names. Every reported codon is then re-read from the FASTA by an independent
+   script (`tools/verify_mutations.py`): it must encode the reported amino acid, and the
+   reference codon must differ from it exactly as the reported base change says.
+   The organism typing is asserted against the published types of those strains
+   (USA300: spa `t008`, CC8, *agr* I, PVL positive, capsule serotype 5, immune evasion
+   cluster type B; EC958: phylogroup B2, `fimH30`, ExPEC, no Shiga toxin), and every
+   organism row must carry an organism, evidence and caveat text. Then a `--cli` run
+   with custom thresholds and a folder of FASTQ files among the inputs, and a fresh
+   unzip run `--offline` on the *S. aureus* genome: the twelve bundled databases and the
+   bundled organism typing data must produce real calls, the files a licence withholds
+   must be absent from the zip, and PubMLST, CARD and the spa type must be reported as
+   missing with the reason, never as empty results
 7. Window test on a 1366×768 screen: the packaged app is driven through its widgets
    (add genomes, settings, a FASTQ drop, **Run analysis**) until the table shows the
    results, then opens **Databases…**. The test checks the table, the workbooks (the same
@@ -427,6 +554,56 @@ python -m pytest -q
 `tools/compare_upstream.py` checks a HYDRA-Win output folder against upstream
 `hydra run --preset deep --format json` on the same genomes and databases. For custom
 thresholds, give both the same `--min-identity` / `--min-coverage`.
+
+## What this software can achieve
+
+From a folder of draft assemblies and nothing else — no Linux, no conda, no internet
+after the first launch — HYDRA-Win gives a clinical microbiology laboratory, in a few
+minutes per genome, a complete and checkable picture of each isolate:
+
+* **What resistance it carries, and where.** Every acquired resistance gene from ten
+  reference databases, each with its contig, coordinates, strand, identity and
+  coverage, so every call can be gone back to in the sequence. When several databases
+  find the same locus, one call is primary and the others stay visible rather than
+  being quietly dropped.
+* **What exactly mutated.** Not a gene name: the codon the isolate carries, read from
+  its own contigs, the reference codon, the base change, the position, the lesion type
+  (substitution, frameshift, premature stop, start loss, interruption), the HGVS name,
+  and the resistance it is associated with — with a gene cut by a contig end labelled as
+  such instead of being called a disruption.
+* **What it is, in the nomenclature the field uses.** The species, the sequence type,
+  and then the organism-specific typing a reference laboratory would report: the spa
+  type and clonal complex of a *S. aureus*, the emm type of a *S. pyogenes*, the
+  capsular serotype of a pneumococcus or a group B streptococcus with its PBP type, the
+  serovar of a *Salmonella* from its antigenic formula, the pathotype and phylogroup of
+  an *E. coli*, the serogroup and fine type of a meningococcus.
+* **What it could do to a patient.** Virulence repertoires, toxin genes and their
+  variants, the prophages that carry them, immune evasion clusters, capsule loci,
+  pathogenicity islands, plasmid replicons — and the resistance, ESBL, carbapenemase,
+  colistin and virulence scores on top.
+* **Why every one of those calls was made.** Each typing call is reported with the
+  evidence behind it — alleles, residues, identity and coverage, contig coordinates,
+  the database version — and with its caveats. That is the difference between a result
+  a microbiologist can sign and a number they have to take on trust.
+* **What could *not* be determined, and why.** A missing database, an incomplete
+  profile, a locus at a contig end, an allele newer than the data: each is named,
+  highlighted and explained. Nothing in this software reports an absence of evidence as
+  evidence of absence.
+* **Something you can act on and keep.** One Excel workbook per genome, with the
+  evidence beside each call, plus a cumulative workbook that puts a whole batch side by
+  side — assemblies against genes, against mutations, against typing schemes — which is
+  what turns a set of isolates into an outbreak question that can be answered. Every
+  workbook carries the app version, the upstream commit, the database versions, the
+  thresholds and the settings used, so a result can be reproduced a year later.
+
+It does this on an ordinary Windows PC, from a zip you extract and double-click, with
+no installation and no administrator rights; and it tells you the provenance and the
+licence of every database it used to do it.
+
+What it is not: it is not a replacement for phenotypic susceptibility testing, it does
+not predict MICs except where a reference laboratory published the value for that exact
+genotype, and it does not read raw reads. It tells you what is in the genome, with the
+evidence; the interpretation stays with the microbiologist.
 
 ## Credit and licence
 

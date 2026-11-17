@@ -20,7 +20,8 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from hydra_amr.records import Hit, SampleResult
+from hydra_amr.records import Hit, SampleResult, TypingResult
+from hydra_amr.typing.organisms import registry as organisms
 
 # ---------------------------------------------------------------- categories
 AMR = "AMR"
@@ -37,7 +38,7 @@ GENOME_SHEETS = ("Summary", "AMR_genes", "Point_mutations", "Virulence", "Plasmi
                  "Typing", "All_hits", "Pivot")
 #: Cumulative workbook sheet names, in workbook order.
 CUMULATIVE_SHEETS = ("Summary", "AMR_matrix", "Mutations_matrix", "Virulence_matrix",
-                     "Plasmids_matrix", "All_hits")
+                     "Plasmids_matrix", "Typing_matrix", "All_hits")
 
 MUTATION_METHODS = ("POINTX", "POINTN", "POINTP", "POINTR", "DISRUPTX", "SUSCEPTIBLEX")
 
@@ -452,9 +453,27 @@ def headline(result: SampleResult, missing: dict | None = None) -> dict:
         f"ST{st}" if st != "-" else "-")
     if st == "-" and missing and "pubmlst" in missing:
         mlst = "not typed (no PubMLST)"
-    return {"species": species_text(result), "mlst": mlst, "amr": counts[AMR],
+    return {"species": species_text(result), "mlst": mlst,
+            "typing": typing_headline(result) or organism_typing_absence(result),
+            "amr": counts[AMR],
             "mutations": counts[MUTATION], "virulence": counts[VIRULENCE],
             "plasmids": counts[PLASMID]}
+
+
+def organism_typing_absence(result: SampleResult) -> str:
+    """Why there is no organism-specific call, in the width of a table cell.
+
+    Three different things, and a reader must not have to guess which: no
+    module covers this species, or one does and its data is not installed, or
+    one ran and determined nothing.
+    """
+    chosen = organisms.select(result.species, result.mlst)
+    if not chosen:
+        return "no module for this species"
+    for warning in result.warnings:
+        if "typing skipped" in warning or "typing failed" in warning:
+            return "data not installed"
+    return "not determined"
 
 
 @dataclass
@@ -569,15 +588,21 @@ def write_genome_summary(ws: Worksheet, result: SampleResult, info: RunInfo) -> 
         row = _kv(ws, row, label(hit), text, colour=type_colour(hit))
 
     row += 1
-    row = _section(ws, row, "Typing")
-    if result.typing:
-        for typing in result.typing:
-            call = typing.call
-            if typing.lineage not in ("-", "", None):
-                call = f"{call} (lineage {typing.lineage})"
-            row = _kv(ws, row, typing_label(typing.scheme), call)
-    else:
-        row = _kv(ws, row, "Lineage / serotype typing", "no scheme applies to this species")
+    row = _section(ws, row, "Typing (the evidence for every call is on the Typing sheet)")
+    row = _kv(ws, row, "Organism typing",
+              typing_headline(result) or organism_typing_absence(result))
+    for typing in sorted(result.typing,
+                         key=lambda t: (t.organism == "", t.organism.lower())):
+        call = typing.call
+        if typing.lineage not in ("-", "", None):
+            call = f"{call} (lineage {typing.lineage})"
+        # The organism is not repeated on every row: the species is at the top
+        # of this sheet, and the Typing sheet has a column for it.
+        row = _kv(ws, row, typing.heading, call,
+                  colour=MISSING_FILL if is_undetermined(typing.call) else None)
+    if not result.typing:
+        row = _kv(ws, row, "Lineage / serotype typing",
+                  "no scheme applies to this species")
 
     row += 1
     row = _section(ws, row, "Assembly QC")
@@ -607,44 +632,111 @@ def write_genome_summary(ws: Worksheet, result: SampleResult, info: RunInfo) -> 
     ws.freeze_panes = "A3"
 
 
-TYPING_COLUMNS = ("Type", "Scheme / database", "Call", "Lineage / detail", "Alleles / profile",
-                  "Loci found", "Contig", "Start", "End", "Strand", "Identity (%)",
-                  "Coverage (%)", "Note")
+TYPING_COLUMNS = ("Type", "Organism", "Scheme / database", "Call", "Lineage / detail",
+                  "Loci found", "Evidence: what the call rests on",
+                  "Caveats, limits and what could not be determined",
+                  "Contig", "Start", "End", "Strand", "Identity (%)", "Coverage (%)")
+
+#: Where the Typing sheet's header row sits. The two rows above it are the
+#: title and the sentence explaining the evidence and caveats columns.
+TYPING_HEADER_ROW = 4
+
+#: A call that says the typing could not be made. Coloured, because a reader
+#: skimming the sheet has to see the difference between "absent" and "not
+#: looked for" without reading every caveat.
+UNDETERMINED = ("not determined", "not typed", "not applicable", "-", "", None)
+
+#: The organism heading used for the schemes that are not organism-specific:
+#: Kleborate's lineage loci, the SCCmec cassette, the capsule loci.
+ANY_ORGANISM = "any species (lineage and element schemes)"
+
+
+def is_undetermined(call) -> bool:
+    text = str(call or "").strip().lower()
+    return text in UNDETERMINED or text.startswith("not determined")
+
+
+def evidence_text(typing: TypingResult) -> str:
+    """The ``alleles`` mapping, one ``key = value`` per line.
+
+    One line per item rather than one run-on string: this is the part a
+    microbiologist checks, and it holds residue lists, contig coordinates,
+    identities and the database version. Excel wraps it, so it stays readable
+    in a single cell.
+    """
+    return "\n".join(f"{key} = {value}" for key, value in typing.alleles.items())
+
+
+def typing_headline(result: SampleResult) -> str:
+    """One line naming what the organism-specific typing concluded."""
+    return organisms.headline(result.typing)
 
 
 def typing_rows(result: SampleResult) -> list[list]:
     rows: list[list] = []
     sp = result.species
-    rows.append(["Species", "MLST scheme map" if sp.evidence else "-", sp.name, sp.confidence,
-                 "", "", "", None, None, "", None, None, sp.evidence])
+    rows.append(["Species", "-", "Mash sketches / MLST scheme map", sp.name,
+                 sp.confidence, "", sp.evidence or "no evidence recorded", "",
+                 "", None, None, "", None, None])
     m = result.mlst
-    rows.append(["MLST", m.scheme, m.sequence_type, m.source if m.scheme != "-" else "-",
-                 m.profile, f"{m.loci_found}/{m.loci_total}" if m.loci_total else "-",
-                 "", None, None, "", round(m.similarity, 2) if m.similarity else None, None,
-                 m.note])
-    for typing in result.typing:
-        alleles = " ".join(f"{k}({v})" for k, v in sorted(typing.alleles.items()))
-        rows.append(["Lineage / element typing", typing_label(typing.scheme), typing.call,
-                     typing.lineage, alleles,
-                     f"{typing.loci_found}/{typing.loci_total}" if typing.loci_total else "-",
-                     "", None, None, "", None, None, typing.note])
+    rows.append(["MLST", "-", m.scheme, m.sequence_type,
+                 m.source if m.scheme != "-" else "-",
+                 f"{m.loci_found}/{m.loci_total}" if m.loci_total else "-",
+                 f"profile = {m.profile}", m.note, "", None, None, "",
+                 round(m.similarity, 2) if m.similarity else None, None])
+    # Grouped by organism module, and inside a group kept in the order the
+    # module reported them: that order is the module author's, and it reads
+    # from the identifying call down to the accessory content.
+    organism_first = sorted(result.typing,
+                            key=lambda t: (t.organism == "", t.organism.lower()))
+    for typing in organism_first:
+        kind = "Organism typing" if typing.organism else "Lineage / element typing"
+        rows.append([kind, typing.organism or ANY_ORGANISM, typing.heading, typing.call,
+                     typing.lineage, typing.loci, evidence_text(typing), typing.note,
+                     "", None, None, "", None, None])
     for hit in sort_hits(h for h in result.hits if category(h) == TYPING):
-        rows.append(["Serotype locus", hit.database, hit.gene, hit.product, "", "",
-                     hit.sequence, hit.start, hit.end, hit.strand, round(hit.identity_pct, 2),
-                     round(hit.coverage_pct, 2), hit.note])
+        rows.append(["Serotype locus", "-", hit.database, hit.gene, hit.product, "",
+                     "", hit.note, hit.sequence, hit.start, hit.end, hit.strand,
+                     round(hit.identity_pct, 2), round(hit.coverage_pct, 2)])
     return rows
 
 
 def write_typing(ws: Worksheet, result: SampleResult) -> int:
-    _write_header(ws, 1, TYPING_COLUMNS)
+    """The Typing sheet: every call, its evidence, and its caveats.
+
+    One row per call. The evidence column is the module's own record of what it
+    read the call from; the caveats column is what is provisional, what
+    disagreed and what could not be determined. Both are shipped in full: a
+    call a clinical microbiologist cannot check is a call they cannot use.
+    """
+    headline = typing_headline(result)
+    ws.cell(row=1, column=1,
+            value=f"Typing: {result.sample}"
+                  f"{' - ' + headline if headline else ''}").font = TITLE_FONT
+    ws.cell(row=2, column=1, value=(
+        "One row per call. 'Evidence' is what the call was read from - alleles, "
+        "residues, identity and coverage, contig coordinates, database version. "
+        "'Caveats' is what is provisional, what disagreed, and what could not be "
+        "determined. 'Not determined' is never a negative result: the caveat says "
+        "why.")).alignment = Alignment(wrap_text=False, vertical="top")
+    header_row = TYPING_HEADER_ROW
+    _write_header(ws, header_row, TYPING_COLUMNS)
     rows = typing_rows(result)
-    for r, values in enumerate(rows, start=2):
+    for r, values in enumerate(rows, start=header_row + 1):
+        undetermined = is_undetermined(values[3])
         for c, value in enumerate(values, start=1):
             cell = ws.cell(row=r, column=c, value=_clean(value))
             cell.border = CELL_BORDER
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:{get_column_letter(len(TYPING_COLUMNS))}{len(rows) + 1}"
-    _autosize(ws, maximum=60)
+            if c in (7, 8):
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+            if undetermined and c == 4:
+                cell.fill = _fill(MISSING_FILL)
+    ws.freeze_panes = f"A{header_row + 1}"
+    ws.auto_filter.ref = (f"A{header_row}:{get_column_letter(len(TYPING_COLUMNS))}"
+                          f"{header_row + len(rows)}")
+    _autosize(ws, maximum=60, skip_rows=header_row - 1)
+    ws.column_dimensions["G"].width = 60
+    ws.column_dimensions["H"].width = 70
     return len(rows)
 
 
@@ -841,8 +933,9 @@ def cumulative_summary_rows(results: Sequence[SampleResult],
         for typing in result.typing:
             if typing.scheme not in typing_schemes:
                 typing_schemes.append(typing.scheme)
-    titles = (["Assembly", "Species", "Species confidence", "MLST scheme", "ST", "MLST profile"]
-              + [typing_label(s) for s in typing_schemes]
+    titles = (["Assembly", "Species", "Species confidence", "MLST scheme", "ST",
+               "MLST profile", "Organism typing (headline)"]
+              + [_scheme_column(results, s) for s in typing_schemes]
               + list(SCORE_LABELS.values())
               + [COUNT_LABELS[c] + " (n)" for c in COUNT_LABELS] + ["AMR drug classes (n)"]
               + ["AMR genes", "Point mutations / disruptions", "Virulence genes",
@@ -853,7 +946,8 @@ def cumulative_summary_rows(results: Sequence[SampleResult],
         typing = {t.scheme: t for t in result.typing}
         counts = category_counts(result)
         row = [result.sample, result.species.name, result.species.confidence,
-               result.mlst.scheme, mlst_text(result, missing), result.mlst.profile]
+               result.mlst.scheme, mlst_text(result, missing), result.mlst.profile,
+               typing_headline(result) or "no organism module applies"]
         for scheme in typing_schemes:
             t = typing.get(scheme)
             row.append("" if t is None else (
@@ -868,6 +962,102 @@ def cumulative_summary_rows(results: Sequence[SampleResult],
                 result.qc.get("gc_percent"), "; ".join(result.warnings)]
         rows.append([_clean(v) for v in row])
     return titles, rows
+
+
+def _scheme_column(results: Sequence[SampleResult], scheme: str) -> str:
+    """A column title for one scheme, naming the organism when there is one.
+
+    ``cps`` means a group B streptococcal serotype in one module and a
+    meningococcal serogroup in another, and a batch may hold both, so the
+    organism has to be part of the column title or the two merge.
+    """
+    for result in results:
+        for typing in result.typing:
+            if typing.scheme == scheme:
+                if typing.organism:
+                    return f"{typing.organism}: {typing.heading}"
+                return typing.heading
+    return typing_label(scheme)
+
+
+def typing_matrix_data(results: Sequence[SampleResult]):
+    """(columns, cells): columns are (organism, scheme); cells[sample][scheme]."""
+    cells: dict[str, dict[str, TypingResult]] = {}
+    columns: "OrderedDict[str, str]" = OrderedDict()
+    for result in results:
+        per = cells.setdefault(result.sample, {})
+        for typing in result.typing:
+            per[typing.scheme] = typing
+            columns.setdefault(typing.scheme, typing.organism or ANY_ORGANISM)
+    ordered = sorted(columns.items(),
+                     key=lambda kv: (kv[1] == ANY_ORGANISM, kv[1].lower(), kv[0].lower()))
+    return ordered, cells
+
+
+def write_typing_matrix(ws: Worksheet, results: Sequence[SampleResult]) -> int:
+    """Assemblies x typing schemes, the call in each cell.
+
+    The one view that answers "is this an outbreak": twenty genomes beside each
+    other, every scheme in a column, so a shared serotype, emm type or clonal
+    complex is visible down the column. A call that could not be made is
+    coloured rather than left blank, because a blank reads as a negative.
+    """
+    columns, cells = typing_matrix_data(results)
+    lead = ["Assembly", "Species", "ST", "Organism typing (headline)"]
+    first = len(lead) + 1
+    for c, title in enumerate(lead, start=1):
+        ws.cell(row=1, column=c,
+                value="Typing matrix" if c == 1 else None).font = Font(bold=True)
+        ws.cell(row=2, column=c, value=title)
+    for index, (scheme, organism) in enumerate(columns):
+        cell = ws.cell(row=1, column=first + index, value=organism)
+        cell.alignment = Alignment(text_rotation=90, horizontal="center",
+                                   vertical="bottom")
+        cell.font = Font(bold=True, color="1F4E78")
+        cell.fill = SECTION_FILL
+    _write_header(ws, 2, lead + [_scheme_title(results, scheme)
+                                 for scheme, _organism in columns])
+    for index in range(len(columns)):
+        ws.cell(row=2, column=first + index).alignment = Alignment(
+            text_rotation=90, horizontal="center", vertical="bottom")
+    ws.row_dimensions[1].height = 150
+    ws.row_dimensions[2].height = 180
+    row = 2
+    for result in sorted(results, key=lambda r: r.sample):
+        row += 1
+        ws.cell(row=row, column=1, value=result.sample).border = CELL_BORDER
+        ws.cell(row=row, column=2, value=result.species.name).border = CELL_BORDER
+        ws.cell(row=row, column=3, value=result.mlst.sequence_type).border = CELL_BORDER
+        ws.cell(row=row, column=4,
+                value=typing_headline(result) or "-").border = CELL_BORDER
+        for index, (scheme, _organism) in enumerate(columns):
+            typing = cells.get(result.sample, {}).get(scheme)
+            cell = ws.cell(row=row, column=first + index,
+                           value="" if typing is None else _clean(typing.call))
+            cell.border = CELL_BORDER
+            if typing is None:
+                continue
+            if is_undetermined(typing.call):
+                cell.fill = _fill(MISSING_FILL)
+            if typing.note:
+                cell.comment = Comment(typing.note[:2000], "HYDRA-Win")
+    if not columns:
+        ws.cell(row=4, column=1,
+                value="No typing scheme applied to any assembly in this run.")
+    ws.freeze_panes = ws.cell(row=3, column=first)
+    _autosize(ws, maximum=28, skip_rows=2)
+    for index in range(len(columns)):
+        ws.column_dimensions[get_column_letter(first + index)].width = 22
+    ws.column_dimensions["D"].width = 34
+    return max(0, row - 2)
+
+
+def _scheme_title(results: Sequence[SampleResult], scheme: str) -> str:
+    for result in results:
+        for typing in result.typing:
+            if typing.scheme == scheme:
+                return typing.heading
+    return typing_label(scheme)
 
 
 def matrix_data(results: Sequence[SampleResult], cats: Sequence[str]):
@@ -1063,6 +1253,8 @@ def write_cumulative_workbook(results: Sequence[SampleResult], path: Path,
             write_mutation_matrix(wb.create_sheet(sheet), results, sheet.replace("_", " "))
         else:
             write_matrix(wb.create_sheet(sheet), results, cats, sheet.replace("_", " "))
+
+    write_typing_matrix(wb.create_sheet("Typing_matrix"), results)
 
     long_rows = []
     for result in results:
