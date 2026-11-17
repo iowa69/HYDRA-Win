@@ -438,7 +438,7 @@ contains:
 ## What is (and isn't) included
 
 HYDRA-Win runs upstream Hydra's own analysis code. It uses a pinned copy of
-`hydra_amr` from [iowa69/hydra](https://github.com/iowa69/hydra) at commit `38a3f46`
+`hydra_amr` from [iowa69/hydra](https://github.com/iowa69/hydra) at commit `75ecbe8`
 (branch `typing-integration`, open as pull requests #2 and #3), with two small,
 documented Windows patches (see `src/hydra_amr/VENDORED.txt`). With Automatic settings,
 the calls match upstream's `--preset deep`:
