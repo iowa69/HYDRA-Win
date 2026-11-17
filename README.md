@@ -1,15 +1,20 @@
-# HYDRA-Win
+<p align="center"><img src="docs/logo.png" alt="Hydra logo" width="112"></p>
+
+<h1 align="center">HYDRA-Win</h1>
+
+<p align="center"><b>Giovanni Lorenzin · IOWA-BioTech</b></p>
 
 <p align="center">
   <a href="https://github.com/iowa69/HYDRA-Win/releases/latest/download/HYDRA-Win-windows-x64.zip">
     <img src="https://img.shields.io/badge/%E2%AC%87%20Download%20HYDRA--Win%20for%20Windows-2ea44f?style=for-the-badge" alt="Download HYDRA-Win for Windows" height="56">
   </a>
   <br>
-  <sub>One zip, about 70 MB. Unzip, double-click <code>Hydra-win.exe</code>. No install.</sub>
+  <sub>One zip, about 70 MB. Unzip, double-click <code>HYDRA-Win.exe</code>. No install.</sub>
 </p>
 
 A portable Windows app for the bacterial genome analyser
-[Hydra](https://github.com/iowa69/hydra). Give it genome assemblies and it reports
+[Hydra](https://github.com/iowa69/hydra). Give it genome assemblies (FASTA; reads
+aren't analysed, see [Assemblies only](#assemblies-only)) and it reports
 acquired AMR genes, resistance point mutations, virulence factors, plasmid replicons,
 MLST, lineage and serotype typing, and resistance/virulence scores, in one Excel
 workbook per genome.
@@ -18,12 +23,39 @@ You don't install anything. There's no conda, no admin rights and no console win
 
 ## Screenshots
 
-The window is shown as captured on Windows 11. The report views are the workbooks
-HYDRA-Win produced for two public genomes, *K. pneumoniae* HS11286 and *E. coli* EC958.
+The window is shown as the release workflow captured it on Windows, on a 1366×768
+screen, while it drove the real app through an analysis of two public genomes,
+*K. pneumoniae* HS11286 and *E. coli* EC958. The report views are the workbooks that
+run produced.
 
-**The window:** drop your assemblies, tick *Cumulative_results* if you want it, click *Run analysis*.
+**1. Add genomes.** The window opens with three steps: add genomes, choose output and
+options, run. It says up front that it analyses assemblies only.
 
-<p align="center"><img src="docs/screenshots/01-window.png" alt="The HYDRA-Win window with two genomes loaded" width="720"></p>
+<p align="center"><img src="docs/screenshots/window-1-empty.png" alt="The empty HYDRA-Win window" width="860"></p>
+
+**Genomes loaded.** One row per genome. *Sample* is the name its results folder and
+workbook will get.
+
+<p align="center"><img src="docs/screenshots/window-2-genomes-loaded.png" alt="Two genomes in the table" width="860"></p>
+
+**2. Settings.** Minimum % identity, minimum % coverage and threads, each Automatic
+unless you enter a value (see [Settings](#settings)).
+
+<p align="center"><img src="docs/screenshots/window-3-settings-open.png" alt="The settings dialog" width="860"></p>
+
+**FASTQ files are not added.** Dropping a folder of reads gives one notice with the
+count.
+
+<p align="center"><img src="docs/screenshots/window-4-fastq-notice.png" alt="Notice that FASTQ files were not added" width="860"></p>
+
+**3. Run.** Each row shows its status live.
+
+<p align="center"><img src="docs/screenshots/window-5-running.png" alt="Analysis running" width="860"></p>
+
+**Finished.** Species, MLST, AMR genes and point mutations fill in as each genome
+finishes. Double-click a row to open its workbook.
+
+<p align="center"><img src="docs/screenshots/window-6-finished.png" alt="Analysis finished with results in the table" width="860"></p>
 
 **Pivot sheet:** every locus against every database, shaded by % identity, with its location.
 
@@ -63,39 +95,93 @@ HYDRA-Win produced for two public genomes, *K. pneumoniae* HS11286 and *E. coli*
    [Releases](https://github.com/iowa69/HYDRA-Win/releases)).
 2. Unzip it into a folder you can write to, for example *Downloads* or *Desktop*
    (not *Program Files*).
-3. Double-click `Hydra-win.exe`.
+3. Double-click `HYDRA-Win.exe`.
 
 The first time it starts, HYDRA-Win downloads the databases it isn't allowed to
 redistribute (see [Databases](#databases)). This needs an internet connection and takes
 a few minutes. It only happens once.
 
-**Using it:** drag FASTA files or folders onto the window, or click **Select files**.
-Then choose a results folder, tick **Cumulative_results** if you want an extra workbook
-that compares all the genomes, and click **Run analysis**. When it's done, click
-**Open results folder**.
+**Using it:**
 
-**Input:** assemblies only. The accepted extensions are `.fasta`, `.fa`, `.fna` and
-`.fas`, each optionally gzipped (`.gz`). If you drop a folder, HYDRA-Win searches it
-recursively.
+1. **Add genomes.** Drag FASTA files or folders onto the window, or click
+   **Add files…** or **Add folder…** (folders are searched recursively). Each genome
+   gets a row. Its *Sample* name comes from the file name, and its results go to
+   `<results>\<sample>\<sample>.xlsx`. When two files have the same name, the second
+   becomes `<name>_2`, the third `<name>_3`, and so on. Those rows are highlighted, so
+   no result is overwritten.
+2. **Choose output and options.** Pick a results folder. Tick
+   **Cumulative_results.xlsx** if you want an extra workbook comparing all the genomes.
+   **Settings…** changes the thresholds and threads (all Automatic by default).
+3. **Run analysis.** Genomes are analysed one after another. Each row goes from
+   *Queued* to *Running* to *Done*, and then shows the species, MLST, number of AMR
+   genes and number of point mutations. A genome that fails is marked *Failed* (the log
+   says why) and the others still run. Double-click a finished row to open its
+   workbook, or click **Open results folder**.
+
+The header's **About** link shows the version, credits and licences.
+
+### Assemblies only
+
+HYDRA-Win analyses **assembled genomes**: one FASTA file per genome (`.fasta`, `.fa`,
+`.fna` or `.fas`, each optionally gzipped). It does **not** analyse reads.
+
+If you drop or select FASTQ files (`.fastq` or `.fq`, compressed or not), HYDRA-Win
+doesn't add them, and one notice says how many were left out. Their names don't matter:
+a FASTQ file is never matched to an assembly or used in any way, whether or not it
+shares the assembly's name. To analyse reads, assemble them first (for example with
+SPAdes or Shovill) and add the assemblies, or use upstream
+[Hydra](https://github.com/iowa69/hydra) on Linux or macOS, which has a reads mode.
+
+### Settings
+
+Click **Settings…**. Every setting is **Automatic** unless you untick it and enter a
+value.
+
+| Setting | Automatic | A value you enter |
+| --- | --- | --- |
+| Minimum % identity | Upstream Hydra's defaults: 80% for the nucleotide databases, except PlasmidFinder (95%) and EcOH (90%), which have stricter defaults of their own | Applies to every nucleotide database and replaces those defaults, exactly like upstream's `--min-identity` |
+| Minimum % coverage | 60% of the reference gene, except EcOH (80%) | Applies to every nucleotide database, like upstream's `--min-coverage` |
+| Threads | All CPU cores | Changes speed only, never results |
+
+The two thresholds filter the nucleotide searches: NCBI, CARD, ResFinder, ARG-ANNOT,
+MEGARes, VFDB, *E. coli* VF, PlasmidFinder and EcOH. As in upstream, the AMRFinderPlus
+protein search keeps its own 90% identity / 90% coverage, and point mutations and
+MLST/typing keep their own rules. Values go from 0 to 100, with decimals allowed
+(`92.5` or `92,5`).
+
+Every workbook's `Summary` sheet records the settings used in a *Settings used*
+section, together with the equivalent upstream flags. `Cumulative_results.xlsx`
+records them under its summary table. Any result can be traced to its thresholds.
 
 ### Headless mode
 
 ```
-Hydra-win.exe --cli genome1.fasta genome2.fna.gz --out C:\results --cumulative
+HYDRA-Win.exe --cli genome1.fasta genome2.fna.gz --out C:\results --cumulative
+HYDRA-Win.exe --cli C:\assemblies --out C:\results --min-identity 90 --min-coverage 80
 ```
 
 This runs the same code path as the window. Other options:
 
 | Option | What it does |
 | --- | --- |
-| `--threads N` | Number of threads to use |
+| `--min-identity PCT` | Minimum % identity (default: Automatic, as above) |
+| `--min-coverage PCT` | Minimum % coverage (default: Automatic, as above) |
+| `--threads N` | Number of threads to use (default: all cores) |
 | `--offline` | Don't download missing databases |
 | `--log FILE` | Also write the log to `FILE` |
 | `--db-status` | Report which databases are installed |
 | `--fetch-db` | Download the first-launch databases, then exit |
 | `--version` | Print the version |
 
-Every run also writes `hydra-win.log` into the results folder.
+FASTQ inputs are skipped with one warning. The exit code is non-zero if any genome
+failed. Every run also writes `hydra-win.log` into the results folder.
+
+### Upgrading from 0.1.0
+
+Unzip 0.2.0 into its own folder. Version 0.1.0 kept its databases inside its own folder
+when it could write there; 0.2.0 downloads those again on its first launch (a few
+minutes). When 0.1.0 couldn't write to its folder, it kept them in
+`%LOCALAPPDATA%\Hydra-win`, and 0.2.0 reuses them from there instead of downloading.
 
 ## Output
 
@@ -103,7 +189,7 @@ For each genome, `<results>\<genome>\<genome>.xlsx` contains these sheets:
 
 | Sheet | Contents |
 | --- | --- |
-| `Summary` | Species, MLST scheme/ST/profile, scores (resistance 0-3, ESBL, carbapenemase, colistin, virulence), counts per category, detected genes per category, lineage/serotype typing, assembly QC, and database versions and thresholds |
+| `Summary` | Species, MLST scheme/ST/profile, scores (resistance 0-3, ESBL, carbapenemase, colistin, virulence), counts per category, detected genes per category, lineage/serotype typing, assembly QC, the settings used, and database versions and thresholds |
 | `AMR_genes` | Every acquired AMR hit and every stress hit (biocide/metal/heat) |
 | `Point_mutations` | Resistance point mutations and gene disruptions, with the mutation (for example `gyrA_S83I`) |
 | `Virulence` | Virulence factor hits |
@@ -139,8 +225,8 @@ contains:
 
 HYDRA-Win runs upstream Hydra's own analysis code. It uses a pinned copy of
 `hydra_amr` from [iowa69/hydra](https://github.com/iowa69/hydra) at commit `6d36c10`,
-with two small, documented Windows patches (see `src/hydra_amr/VENDORED.txt`). The
-settings match upstream's `--preset deep`:
+with two small, documented Windows patches (see `src/hydra_amr/VENDORED.txt`). With
+Automatic settings, the analysis matches upstream's `--preset deep`:
 
 * every installed gene database
 * AMRFinderPlus translated search with `--plus` elements
@@ -165,8 +251,8 @@ Two pieces are added for Windows:
 
 **Limitations**
 
-* **Reads aren't supported.** There's no FASTQ input and no heteroresistance or
-  allele-fraction analysis. Upstream's read mode needs minimap2, samtools and pysam,
+* **Reads aren't supported** (see [Assemblies only](#assemblies-only)). There's no
+  FASTQ input and no heteroresistance or allele-fraction analysis. Upstream's read mode needs minimap2, samtools and pysam,
   and none of them runs natively on Windows. Use upstream Hydra on Linux or macOS for
   reads.
 * **`vfdb_full` isn't used.** Upstream can't download it automatically, it overlaps
@@ -218,8 +304,13 @@ through these steps:
 5. Zip
 6. Smoke test of the packaged exe: first launch, then `--cli --cumulative` on two public
    NCBI genomes (*K. pneumoniae* HS11286 and *E. coli* EC958), with assertions on
-   sheets, hits, coordinates and known genes and mutations
-7. GUI start-up test
+   sheets, hits, coordinates and known genes and mutations, then a `--cli` run with
+   custom thresholds and a folder of FASTQ files among the inputs
+7. Window test on a 1366×768 screen: the packaged app is driven through its widgets
+   (add genomes, settings, a FASTQ drop, **Run analysis**) until the table shows the
+   results. The test checks the table, the workbooks (the same hits as the `--cli` run)
+   and that the window and its log fit on the screen, and it saves the window
+   screenshots shown above
 
 A `v*` tag publishes the zip as a release.
 
@@ -233,10 +324,12 @@ python -m pytest -q
 ```
 
 `tools/compare_upstream.py` checks a HYDRA-Win output folder against upstream
-`hydra run --preset deep --format json` on the same genomes and databases.
+`hydra run --preset deep --format json` on the same genomes and databases. For custom
+thresholds, give both the same `--min-identity` / `--min-coverage`.
 
 ## Credit and licence
 
-HYDRA-Win is MIT-licensed (see `LICENSE`). The analysis is upstream
+HYDRA-Win is by Giovanni Lorenzin · IOWA-BioTech and is MIT-licensed (see `LICENSE`).
+The logo is upstream Hydra's. The analysis is upstream
 [Hydra](https://github.com/iowa69/hydra), also MIT; its licence is kept in
 `src/hydra_amr/LICENSE`. Please cite Hydra and the databases you rely on.
