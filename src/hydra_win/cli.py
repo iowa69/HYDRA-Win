@@ -138,6 +138,9 @@ def build_parser() -> argparse.ArgumentParser:
     maintenance.add_argument("--db-status", nargs="?", const="-", default=None, metavar="FILE",
                              help="write the database status as JSON (to FILE or stdout) "
                                   "and exit")
+    maintenance.add_argument("--import-db", type=Path, metavar="FOLDER",
+                             help="install missing databases (PubMLST, CARD) from a 'db' folder "
+                                  "copied from another PC where the download worked, and exit")
     maintenance.add_argument("--build-db", type=Path, metavar="DIR",
                              help="build the redistributable (bundled) databases into DIR")
     maintenance.add_argument("--version", action="store_true", help="print the version and exit")
@@ -176,17 +179,27 @@ def main(argv: list[str] | None = None) -> int:
         if args.db_status:
             from hydra_amr.db.manager import DatabaseStore  # noqa: PLC0415
 
+            from . import netfetch  # noqa: PLC0415
+
+            netfetch.install()
             rows = databases.status(DatabaseStore(rt.db_root))
             text = json.dumps({"version": __version__, "frozen": runtime.is_frozen(),
                                "utf8_mode": bool(sys.flags.utf8_mode),
                                "home": str(rt.home), "blast_cwd": str(rt.blast_cwd),
                                "db_root": str(rt.db_root), "blast_dir": str(rt.blast_dir),
+                               "network": netfetch.environment(),
                                "databases": rows}, indent=2)
             if args.db_status == "-":
                 print(text)
             else:
                 Path(args.db_status).write_text(text, encoding="utf-8")
             return 0
+        if args.import_db:
+            from hydra_amr.db.manager import DatabaseStore  # noqa: PLC0415
+
+            imported, message = databases.import_folder(DatabaseStore(rt.db_root), args.import_db)
+            (LOG.info if imported else LOG.error)("%s", message)
+            return 0 if imported else 1
         if args.fetch_db:
             failures = core.ensure_databases(offline=False)
             for name, error in failures.items():
@@ -208,6 +221,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Cumulative_results\t{result.cumulative}")
         for name, error in result.failed.items():
             print(f"{name}\tFAILED: {error}")
+        for name, impact in result.missing_analyses.items():
+            print(f"NOT PERFORMED\t{name}: {impact}")
         return 1 if result.failed else 0
     except HydraError as exc:
         LOG.error("%s", exc)

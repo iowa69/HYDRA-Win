@@ -5,17 +5,17 @@ from __future__ import annotations
 import pytest
 from openpyxl import load_workbook
 
-from hydra_amr.records import Hit, MlstCall, SampleResult, SpeciesCall, TypingResult
+from hydra_amr.records import Hit, MlstCall, MutationDetail, SampleResult, SpeciesCall, TypingResult
 from hydra_win import excel
 
 
 def _hit(sample, db, gene, *, start, end, contig="contig_1", strand="+", identity=100.0,
          coverage=100.0, element_type="AMR", drug_class="BETA-LACTAM", primary=True,
-         method="BLASTN", resolution="COMPLETE", note=""):
+         method="BLASTN", resolution="COMPLETE", note="", mutation=None):
     return Hit(sample=sample, database=db, gene=gene, element_type=element_type,
                drug_class=drug_class, sequence=contig, start=start, end=end, strand=strand,
                identity_pct=identity, coverage_pct=coverage, primary=primary, method=method,
-               resolution=resolution, note=note, product=f"{gene} product")
+               resolution=resolution, note=note, product=f"{gene} product", mutation=mutation)
 
 
 def _result(name, kpc=True):
@@ -25,7 +25,17 @@ def _result(name, kpc=True):
              primary=False),
         _hit(name, "ncbi", "blaSHV-11", start=5000, end=5861, strand="-", identity=97.0),
         _hit(name, "protein", "gyrA", start=9000, end=11600, method="POINTX",
-             resolution="POINT", drug_class="QUINOLONE", identity=99.8, note="gyrA_S83I (I)"),
+             resolution="POINT", drug_class="QUINOLONE", identity=99.8, note="gyrA_S83I (I)",
+             mutation=MutationDetail(
+                 symbol="gyrA_S83I", call_type="substitution",
+                 type_label="Amino-acid substitution", protein_change="S83I",
+                 protein_hgvs="p.Ser83Ile", nucleotide_change="c.248G>T (inferred)",
+                 nucleotide_basis="inferred: no reference CDS", observed="ATC",
+                 reference_inferred="AGC", base_change="G>T at codon position 2",
+                 contig="contig_1", start=9248, end=9250, strand="+",
+                 location="contig_1:9248-9250 (+)", gene_location="contig_1:9000-11600 (+)",
+                 resistance="quinolone resistance", kleborate="GyrA:p.Ser83Ile",
+                 description="gyrA codon 83 reads ATC (Ile)...")),
         _hit(name, "vfdb", "ybtS", start=20000, end=21300, element_type="VIRULENCE",
              drug_class="", identity=92.0),
         _hit(name, "plasmidfinder", "IncFIB(K)_1", start=10, end=570, contig="plasmid_A",
@@ -98,7 +108,22 @@ def test_genome_workbook(tmp_path):
 
     mutations = _table(wb["Point_mutations"])
     assert [r["Mutation"] for r in mutations] == ["gyrA_S83I"]
-    assert mutations[0]["Start"] == 9000
+    m = mutations[0]
+    header = [c.value for c in wb["Point_mutations"][1]]
+    # What changed comes first, the raw hit columns after it.
+    assert header[:4] == ["Mutation", "Type of call", "Gene", "Protein change"]
+    assert header.index("Contig") > header.index("Not resolved")
+    assert m["Protein change (HGVS)"] == "p.Ser83Ile"
+    assert m["Isolate codon / base (read from the assembly)"] == "ATC"
+    assert m["Reference codon (INFERRED by parsimony, no reference CDS)"] == "AGC"
+    assert m["Reference codon / base (from a reference sequence)"] == excel.NO_REFERENCE_CDS
+    assert m["Mutation position on contig"] == "contig_1:9248-9250 (+)"
+    assert m["Resistance it is associated with"] == "quinolone resistance"
+    assert m["Start"] == 9000                                  # the raw gene hit is kept
+    all_rows = _table(wb["All_hits"])
+    gyr = next(r for r in all_rows if r["Gene"] == "gyrA")
+    assert "p.Ser83Ile" in gyr["Mutation: what changed"]
+    assert "ATC at contig_1:9248-9250 (+)" in gyr["Mutation: what changed"]
     assert [r["Gene"] for r in _table(wb["Virulence"])] == ["ybtS"]
     assert [r["Gene"] for r in _table(wb["Plasmids"])] == ["IncFIB(K)_1"]
 
@@ -117,6 +142,8 @@ def test_genome_workbook(tmp_path):
     assert summary["Carbapenemase"] == "yes"
     assert summary["AMR genes"] == 2  # KPC and SHV; the CARD KPC call is redundant
     assert summary["Point mutations / disruptions"] == 1
+    assert summary["Point mutations / disruptions (names)"] == "gyrA_S83I (quinolone resistance)"
+    assert summary["gyrA_S83I"].startswith("gyrA codon 83 reads ATC")
 
     # Pivot: one row per locus, the redundant CARD call shown in its own column
     pivot = _table(wb["Pivot"], header_row=5)
@@ -124,7 +151,9 @@ def test_genome_workbook(tmp_path):
     assert kpc_row["ncbi"] == 100.0 and kpc_row["card"] == 99.9
     assert kpc_row["Databases"] == 2
     assert not any(r["Gene"] == "KPC-2" for r in pivot)
-    assert any(r["Gene"] == "gyrA_S83I" for r in pivot)
+    gyr_row = next(r for r in pivot if r["Gene"] == "gyrA_S83I")
+    assert gyr_row["protein"] == "S83I"                       # the change, not an identity
+    assert gyr_row["Location"].startswith("contig_1:9248-9250 (+)")
     assert wb["Pivot"].freeze_panes == "D6"
 
 
@@ -151,8 +180,10 @@ def test_cumulative_workbook(tmp_path):
     assert kpc_cell.fill.fgColor.rgb.endswith(excel.IDENTITY_BANDS[0][1])
     assert ws.cell(row=1, column=header.index("blaKPC-2") + 1).value == "BETA-LACTAM"
 
-    mutations = _table(wb["Mutations_matrix"], header_row=2)
-    assert all(r["gyrA_S83I"] == 99.8 for r in mutations)
+    mutations = _table(wb["Mutations_matrix"], header_row=3)
+    assert all(r["gyrA"] == "S83I" for r in mutations)        # the change, not 99.8
+    assert wb["Mutations_matrix"].cell(row=2, column=5).value == "quinolone resistance"
+    assert summary[0]["Point mutations / disruptions"] == "gyrA_S83I (quinolone resistance)"
     assert _table(wb["Virulence_matrix"], header_row=2)[0]["ybtS"] == 92.0
     assert _table(wb["Plasmids_matrix"], header_row=2)[1]["IncFIB(K)_1"] == 100.0
 

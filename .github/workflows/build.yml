@@ -70,6 +70,7 @@ jobs:
           path: |
             ${{ runner.temp }}/smoke/smoke-results
             ${{ runner.temp }}/smoke/results custom
+            ${{ runner.temp }}/smoke/results offline
             ${{ runner.temp }}/smoke/gui results ä
             ${{ runner.temp }}/smoke/*.log
             ${{ runner.temp }}/smoke/*.txt

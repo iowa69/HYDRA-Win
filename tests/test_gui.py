@@ -87,3 +87,28 @@ def test_about_window(app):
     assert "HYDRA-Win" in texts and "Giovanni Lorenzin · IOWA-BioTech" in texts
     assert any("github.com/iowa69/HYDRA-Win" in t for t in texts)
     app.about_window.destroy()
+
+
+def test_databases_dialog_shows_each_database_and_why_it_is_missing(app, tmp_path,
+                                                                     monkeypatch):
+    from hydra_amr.db.manager import DatabaseStore
+
+    from hydra_win import databases
+
+    store = DatabaseStore(tmp_path / "db")
+    (store.root / "prot" / "amrfinderplus").mkdir(parents=True)
+    store.record("protein", kind="prot", path="prot/amrfinderplus", version="2026-05-15.1")
+    databases.record_outcome(store, "pubmlst", "the proxy server requires authentication "
+                                               "(HTTP 407)")
+    monkeypatch.setattr(type(app), "database_status",
+                        lambda self: databases.status(store))
+    dialog = app.show_databases()
+    assert len(dialog.rows) == len(databases.ALL)
+    statuses = {r["name"]: dialog.status_text(r) for r in dialog.rows}
+    assert statuses["protein"].startswith("Installed")
+    assert statuses["pubmlst"] == "MISSING: the proxy server requires authentication (HTTP 407)"
+    assert "PubMLST (no MLST)" in app.db_label.cget("text")
+    assert "NO MLST" in dialog.detail.cget("text")
+    assert str(dialog.retry_button["state"]) == "normal"
+    dialog.close()
+    assert app.db_dialog is None

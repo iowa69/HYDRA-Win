@@ -1,11 +1,16 @@
 """Which reference databases HYDRA-Win uses, and how each one reaches the user.
 
-Two routes, decided by each source's licence:
+Two routes:
 
 * **bundled** - built in CI from the upstream source and shipped inside the
-  release zip, because the licence allows redistribution;
-* **first launch** - downloaded from the upstream source on the user's machine
-  the first time the app starts, because redistribution is not granted.
+  release zip. That covers every source whose licence allows redistribution,
+  and, at the owner's request, the five sources that state no licence at all
+  (VFDB, ARG-ANNOT, MEGARes, E. coli VF, EcOH), which abricate's public
+  repository has redistributed for years; DATABASES.txt says so and invites a
+  rights holder to ask for removal;
+* **first launch** - downloaded from the upstream source on the user's machine,
+  because the source's terms withhold redistribution (CARD, PubMLST). These can
+  also be imported from a folder copied from another PC (:func:`import_folder`).
 
 Building uses upstream Hydra's own fetchers and importers
 (:meth:`hydra_amr.db.manager.DatabaseStore.download`), so the database is
@@ -17,6 +22,7 @@ the same importer.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import shutil
@@ -57,6 +63,10 @@ class Route:
     why: str
 
 
+NO_LICENCE = ("bundled at the project owner's request: the source states no licence; "
+              "redistributed for years by abricate's public repository; a rights holder can "
+              "ask for removal (see DATABASES.txt)")
+
 #: Every database HYDRA-Win installs, in install order (protein first: the
 #: nucleotide importers borrow its drug-class annotation).
 ROUTES: tuple[Route, ...] = (
@@ -71,22 +81,47 @@ ROUTES: tuple[Route, ...] = (
           "redistribution permitted with the licence text and source location"),
     Route("species", "bundled", "GPL-3.0 (Kleborate species Mash sketches)",
           "redistribution permitted with the licence text and source location"),
+    Route("vfdb", "bundled", "VFDB core set: no licence stated by the source", NO_LICENCE),
+    Route("argannot", "bundled", "ARG-ANNOT: no licence stated by the source", NO_LICENCE),
+    Route("megares", "bundled", "MEGARes: no licence stated by the source", NO_LICENCE),
+    Route("ecoli_vf", "bundled", "E. coli VF: no licence stated by the source", NO_LICENCE),
+    Route("ecoh", "bundled", "EcOH: no licence stated by the source", NO_LICENCE),
     Route("pubmlst", "first launch", "PubMLST terms of use",
-          "since 2025 PubMLST treats redistribution/repackaging of downloaded data as "
-          "restricted use"),
+          "PubMLST's terms forbid redistributing or repackaging data downloaded since 2025"),
     Route("card", "first launch", "CARD terms of use (academic/non-commercial)",
-          "no redistribution grant; commercial use needs a McMaster licence"),
-    Route("vfdb", "first launch", "VFDB (no redistribution licence stated)",
-          "upstream Hydra classes it as academic use"),
-    Route("argannot", "first launch", "ARG-ANNOT (no redistribution licence stated)",
-          "upstream Hydra classes it as academic use"),
-    Route("megares", "first launch", "MEGARes (no redistribution licence stated)",
-          "upstream Hydra classes it as academic use"),
-    Route("ecoli_vf", "first launch", "E. coli VF (no explicit data licence)",
-          "redistribution not clearly granted"),
-    Route("ecoh", "first launch", "EcOH (no explicit data licence)",
-          "redistribution not clearly granted"),
+          "CARD's terms forbid redistribution without McMaster University's written consent"),
 )
+
+#: What is missing from a run when a database is not installed, in words.
+#: A missing database must never read as a negative result.
+IMPACT = {
+    "protein": "no AMRFinderPlus protein search and no point mutations (required)",
+    "ncbi": "NCBI AMRFinderPlus nucleotide genes not screened (required)",
+    "resfinder": "ResFinder genes not screened",
+    "plasmidfinder": "no plasmid replicon typing (PlasmidFinder not installed)",
+    "sccmec": "no SCCmec typing (SCCmecFinder not installed)",
+    "lineage": "no lineage/virulence-locus typing (Kleborate modules not installed)",
+    "species": "species named from the MLST scheme only (Mash sketches not installed)",
+    "vfdb": "VFDB virulence genes not screened",
+    "argannot": "ARG-ANNOT genes not screened",
+    "megares": "MEGARes genes not screened",
+    "ecoli_vf": "E. coli virulence factors (ecoli_vf) not screened",
+    "ecoh": "E. coli O/H serotype loci not screened (EcOH not installed)",
+    "pubmlst": ("NO MLST: the PubMLST schemes are not installed, so no sequence type was "
+                "determined; an empty ST is not a negative result"),
+    "card": "CARD not screened: genes only CARD lists were not looked for",
+}
+
+#: Display names.
+TITLES = {"protein": "AMRFinderPlus proteins + point mutations", "ncbi": "NCBI AMRFinderPlus genes",
+          "resfinder": "ResFinder", "plasmidfinder": "PlasmidFinder", "sccmec": "SCCmecFinder",
+          "lineage": "Kleborate lineage modules", "species": "Kleborate species sketches",
+          "vfdb": "VFDB (core)", "argannot": "ARG-ANNOT", "megares": "MEGARes",
+          "ecoli_vf": "E. coli VF", "ecoh": "EcOH", "pubmlst": "PubMLST (MLST schemes)",
+          "card": "CARD"}
+
+#: Last download outcome per database, kept next to the manifest.
+STATUS_FILE = "download-status.json"
 
 BUNDLED = tuple(r.name for r in ROUTES if r.route == "bundled")
 FIRST_LAUNCH = tuple(r.name for r in ROUTES if r.route == "first launch")
@@ -155,15 +190,92 @@ def adopt(store: DatabaseStore, names, sources) -> list[str]:
 def status(store: DatabaseStore) -> list[dict]:
     rows = []
     installed = store.installed()
+    failures = load_failures(store)
     for route in ROUTES:
         entry = installed.get(route.name, {})
+        ok = store.is_installed(route.name)
+        failure = failures.get(route.name, {}) if not ok else {}
         rows.append({
-            "name": route.name, "route": route.route, "licence": route.licence,
-            "installed": store.is_installed(route.name),
+            "name": route.name, "title": TITLES.get(route.name, route.name),
+            "route": route.route, "licence": route.licence,
+            "installed": ok,
             "version": entry.get("version", ""),
             "sequences": entry.get("sequences", entry.get("schemes", "")),
+            "installed_on": entry.get("installed", ""),
+            "source": entry.get("source", ""),
+            "reason": failure.get("reason", "" if ok else "not installed yet"),
+            "failed_at": failure.get("when", ""),
+            "impact": "" if ok else IMPACT.get(route.name, f"{route.name} not available"),
         })
     return rows
+
+
+def missing_analyses(store: DatabaseStore, names: tuple[str, ...] = ALL) -> dict[str, str]:
+    """name -> what the run cannot do because that database is not installed."""
+    return {name: IMPACT.get(name, f"{name} not available")
+            for name in names if not store.is_installed(name)}
+
+
+# ----------------------------------------------------------- failure record
+def load_failures(store: DatabaseStore) -> dict[str, dict]:
+    try:
+        data = json.loads((store.root / STATUS_FILE).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def record_outcome(store: DatabaseStore, name: str, reason: str | None) -> None:
+    """Remember why *name* failed (or forget a failure once it installs)."""
+    data = load_failures(store)
+    if reason:
+        data[name] = {"reason": reason, "when": time.strftime("%Y-%m-%d %H:%M:%S")}
+    else:
+        data.pop(name, None)
+    try:
+        path = store.root / STATUS_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    except OSError as exc:
+        LOG.debug("could not record the download outcome of %s: %s", name, exc)
+
+
+# ------------------------------------------------------- import from a folder
+def _candidate_roots(folder: Path) -> list[Path]:
+    """A database root inside *folder*: the folder itself, its db/ or HYDRA-Win/db."""
+    folder = Path(folder)
+    out = []
+    for root in (folder, folder / "db", folder / "HYDRA-Win" / "db"):
+        if (root / "manifest.json").exists():
+            out.append(root)
+    return out
+
+
+def import_folder(store: DatabaseStore, folder: Path | str,
+                  names: tuple[str, ...] = ALL) -> tuple[list[str], str]:
+    """Install missing databases from a copy made on another PC.
+
+    *folder* can be HYDRA-Win's ``db`` folder copied from a PC where the
+    download worked, the whole HYDRA-Win folder, or an upstream Hydra database
+    (``~/.hydra/db``). Returns (imported names, message).
+    """
+    roots = _candidate_roots(Path(folder))
+    if not roots:
+        return [], (f"{folder} is not a database folder: it has no manifest.json (copy the whole "
+                    "'db' folder that sits next to HYDRA-Win.exe on the other PC)")
+    wanted = [name for name in names if not store.is_installed(name)]
+    if not wanted:
+        return [], "every database is already installed"
+    imported = adopt(store, wanted, roots)
+    for name in imported:
+        record_outcome(store, name, None)
+        store.record(name, imported_from=str(Path(folder)))
+    still = [name for name in wanted if not store.is_installed(name)]
+    message = (f"imported {', '.join(imported)} from {folder}" if imported
+               else f"{folder} holds none of the missing databases ({', '.join(wanted)})")
+    if imported and still:
+        message += f"; still missing: {', '.join(still)}"
+    return imported, message
 
 
 def _download_abricate(store: DatabaseStore, name: str) -> None:
@@ -192,7 +304,10 @@ def _ncbi_version(store: DatabaseStore) -> str:
 
 def install(store: DatabaseStore, names: list[str], progress: ProgressFn | None = None,
             stop_on_error: bool = False) -> dict[str, str]:
-    """Download and import *names* in order. Returns name -> error for failures."""
+    """Download and import *names* in order. Returns name -> reason for failures."""
+    from . import netfetch  # noqa: PLC0415
+
+    netfetch.install()
     _pin_kleborate()
     order = [name for name in ALL if name in names] + [n for n in names if n not in ALL]
     errors: dict[str, str] = {}
@@ -212,10 +327,15 @@ def install(store: DatabaseStore, names: list[str], progress: ProgressFn | None 
             if name in ("protein", "ncbi"):
                 extra["version"] = _ncbi_version(store)
             store.record(name, source=source_url(name), **{k: v for k, v in extra.items() if v})
+            record_outcome(store, name, None)
             LOG.info("installed %s in %.0fs", name, time.time() - started)
         except Exception as exc:  # noqa: BLE001 - one source must not sink the rest
-            errors[name] = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
-            LOG.error("could not install %s: %s", name, errors[name])
+            from .netfetch import describe_failure  # noqa: PLC0415
+
+            errors[name] = describe_failure(exc)
+            LOG.error("could not install %s from %s: %s", name, source_url(name), errors[name])
+            LOG.debug("details: %s", exc)
+            record_outcome(store, name, errors[name])
             shutil.rmtree(store.root / ".download" / name, ignore_errors=True)
             if stop_on_error:
                 raise
@@ -236,7 +356,21 @@ def build_bundle(db_root: Path, names: tuple[str, ...] = BUNDLED) -> Path:
     db_root = Path(db_root)
     store = DatabaseStore(db_root)
     _pin_kleborate()
-    install(store, list(names), stop_on_error=True)
+    # A source server that is briefly unreachable from CI is retried, never
+    # replaced by an older copy: the build fails if a source stays down.
+    pending = list(names)
+    for attempt in range(3):
+        errors = install(store, pending)
+        pending = [name for name in pending if name in errors]
+        if not pending:
+            break
+        LOG.warning("bundle build: retrying %s in %ds", ", ".join(pending), 60 * (attempt + 1))
+        time.sleep(60 * (attempt + 1))
+    if pending:
+        raise HydraError(f"could not build the bundled databases {', '.join(pending)}: "
+                         + "; ".join(f"{n}: {load_failures(store).get(n, {}).get('reason')}"
+                                     for n in pending))
+    (db_root / STATUS_FILE).unlink(missing_ok=True)
 
     licences = db_root / "licences"
     licences.mkdir(parents=True, exist_ok=True)
@@ -255,20 +389,36 @@ def build_bundle(db_root: Path, names: tuple[str, ...] = BUNDLED) -> Path:
 
 
 def write_notice(db_root: Path, kleborate_source: str = "") -> None:
+    store = DatabaseStore(db_root)
+    installed = store.installed()
     lines = [
         "HYDRA-Win reference databases",
         "=============================",
         "",
-        "Each database keeps its own licence. Databases marked 'bundled' were built",
-        "from the upstream source by the HYDRA-Win release workflow and are",
-        "redistributed under that source's licence; databases marked 'first launch'",
-        "are not redistributed and are downloaded from their source on your computer.",
+        "Each database keeps its own terms. Databases marked 'bundled' were built from",
+        "the upstream source by the HYDRA-Win release workflow on the date shown and",
+        "ship inside the zip; databases marked 'first launch' are not redistributed and",
+        "are downloaded from their source on your computer (or imported from a copy",
+        "made on another PC: HYDRA-Win.exe --import-db FOLDER).",
+        "",
+        "VFDB, ARG-ANNOT, MEGARes, E. coli VF and EcOH state no licence at all. They",
+        "are bundled at the project owner's request, as abricate's public repository",
+        "has long redistributed them, with their sources and citations below. If you",
+        "hold rights in one of them and want it removed from the zip, open an issue at",
+        "https://github.com/iowa69/HYDRA-Win/issues and it will be moved back to a",
+        "first-launch download.",
         "",
     ]
     for route in ROUTES:
         spec = DATABASES.get(route.name)
+        entry = installed.get(route.name, {})
         lines.append(f"{route.name:14s} {route.route:13s} {route.licence}")
         lines.append(f"{'':14s} source:   {source_url(route.name)}")
+        if route.name in ABRICATE_ONLY:
+            lines.append(f"{'':14s} copy:     abricate repository, commit {ABRICATE_COMMIT}")
+        if entry.get("version") or entry.get("installed"):
+            lines.append(f"{'':14s} version:  {entry.get('version') or 'not stated by the source'}"
+                         f"; built {entry.get('installed', '')[:10]}")
         if spec and spec.citation:
             lines.append(f"{'':14s} citation: {spec.citation}")
         lines.append("")

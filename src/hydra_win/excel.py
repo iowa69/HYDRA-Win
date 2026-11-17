@@ -61,7 +61,10 @@ def category(hit: Hit) -> str:
 
 
 def label(hit: Hit) -> str:
-    """Gene name, or the mutation itself (``gyrA_S83L``) for a point mutation."""
+    """Gene name, or the mutation itself (``gyrA_S83L``, ``ompK35_G134AfsTer11``)."""
+    detail = getattr(hit, "mutation", None)
+    if category(hit) == MUTATION and detail is not None and detail.symbol:
+        return detail.symbol
     if category(hit) == MUTATION and hit.note:
         first = hit.note.split()[0].rstrip(";,")
         if first.startswith(hit.gene) and first != hit.gene:
@@ -163,6 +166,125 @@ def hit_values(hit: Hit) -> list:
     return out
 
 
+#: The leading columns of the Point_mutations sheet: what changed, where, and
+#: what it means. The raw hit columns follow them.
+MUTATION_COLUMNS: tuple[tuple[str, str, int], ...] = (   # title, MutationDetail field, width
+    ("Mutation", "symbol", 24),
+    ("Type of call", "type_label", 30),
+    ("Gene", "gene", 9),
+    ("Protein change", "protein_change", 15),
+    ("Protein change (HGVS)", "protein_hgvs", 22),
+    ("Nucleotide change", "nucleotide_change", 24),
+    ("Isolate codon / base (read from the assembly)", "observed", 24),
+    ("Reference codon / base (from a reference sequence)", "reference", 16),
+    ("Reference codon (INFERRED by parsimony, no reference CDS)", "reference_inferred", 16),
+    ("Base changed", "base_change", 24),
+    ("Mutation position on contig", "location", 30),
+    ("Gene position on contig", "gene_location", 30),
+    ("Intact reference (disruptions)", "intact", 24),
+    ("Resistance it is associated with", "resistance", 30),
+    ("Kleborate-style call", "kleborate", 20),
+    ("What it means", "description", 70),
+    ("Basis of the base change", "nucleotide_basis", 50),
+    ("Not resolved", "unresolved", 40),
+)
+#: Raw columns already shown among the leading ones.
+_MUTATION_RAW_SKIP = ("gene",)
+NO_REFERENCE_CDS = "n/a (no reference CDS)"
+
+DISRUPTION_COLOUR = "F4B183"
+CONTIG_END_COLOUR = "D9D9D9"
+DIVERGENT_COLOUR = "C9B3E6"
+INFERRED_FILL = "FFF2CC"
+
+
+def mutation_detail(hit: Hit):
+    return getattr(hit, "mutation", None)
+
+
+def mutation_values(hit: Hit) -> list:
+    """The leading Point_mutations values for one hit."""
+    detail = mutation_detail(hit)
+    out = []
+    for _title, field_name, _width in MUTATION_COLUMNS:
+        if field_name == "gene":
+            out.append(hit.gene)
+            continue
+        if detail is None:
+            out.append(label(hit) if field_name == "symbol" else
+                       ("not described (no alignment detail)" if field_name == "unresolved"
+                        else ""))
+            continue
+        value = getattr(detail, field_name, "")
+        if field_name == "symbol":
+            value = value or label(hit)
+        if field_name == "reference" and not value and detail.call_type in (
+                "substitution", "nonsense", "insertion", "deletion", "disruption_stop",
+                "disruption_frameshift"):
+            value = NO_REFERENCE_CDS
+        out.append(_clean(value))
+    return out
+
+
+def type_colour(hit: Hit) -> str:
+    detail = mutation_detail(hit)
+    kind = detail.call_type if detail is not None else ""
+    if kind == "contig_end":
+        return CONTIG_END_COLOUR
+    if kind == "divergent":
+        return DIVERGENT_COLOUR
+    if kind.startswith("disruption"):
+        return DISRUPTION_COLOUR
+    return MUTATION_COLOUR
+
+
+def change_text(hit: Hit) -> str:
+    """The change in a few characters, for matrix cells: S83I, G134AfsTer11, n.2059A>G."""
+    detail = mutation_detail(hit)
+    if detail is None:
+        return label(hit)
+    if detail.call_type == "contig_end":
+        return "cut by contig end (not evidence)"
+    if detail.call_type == "divergent":
+        return f"divergent allele ({hit.identity_pct:.1f}% id)"
+    if detail.protein_change:
+        return detail.protein_change
+    if detail.nucleotide_change:
+        return detail.nucleotide_change
+    return detail.symbol or label(hit)
+
+
+def mutation_summary(hit: Hit) -> str:
+    """One line: symbol, change, codon and place, resistance (All_hits, Summary sheets)."""
+    detail = mutation_detail(hit)
+    if detail is None:
+        return label(hit) if category(hit) == MUTATION else ""
+    parts = [detail.symbol or label(hit), detail.type_label]
+    if detail.protein_hgvs:
+        parts.append(detail.protein_hgvs)
+    if detail.nucleotide_change:
+        parts.append(detail.nucleotide_change)
+    if detail.observed and detail.location:
+        parts.append(f"{detail.observed} at {detail.location}")
+    elif detail.location:
+        parts.append(detail.location)
+    if detail.resistance:
+        parts.append(detail.resistance)
+    return "; ".join(p for p in parts if p)
+
+
+def mutation_lines(result: SampleResult) -> list[str]:
+    """'gyrA_S83I (quinolone resistance)' for every primary mutation call, in order."""
+    out = []
+    for hit in sort_hits(h for h in result.hits if h.primary and category(h) == MUTATION):
+        detail = mutation_detail(hit)
+        what = detail.resistance if detail is not None else (hit.drug_class or "").lower()
+        if detail is not None and detail.call_type == "contig_end":
+            what = "gene cut by a contig end, not evidence of disruption"
+        out.append(f"{label(hit)} ({what})" if what else label(hit))
+    return out
+
+
 def sort_hits(hits: Iterable[Hit]) -> list[Hit]:
     return sorted(hits, key=lambda h: (CATEGORY_ORDER.index(category(h)), h.sequence,
                                        min(h.start, h.end), h.gene, h.database))
@@ -193,31 +315,73 @@ def _autosize(ws: Worksheet, minimum: int = 6, maximum: int = 60,
 
 
 def write_hit_table(ws: Worksheet, hits: Sequence[Hit], *, leading: Sequence[tuple[str, object]] = (),
-                    with_category: bool = False) -> int:
-    """Write *hits* as a filterable table. Returns the number of data rows."""
+                    with_category: bool = False, mutations: bool = False,
+                    with_mutation_summary: bool = False) -> int:
+    """Write *hits* as a filterable table. Returns the number of data rows.
+
+    ``mutations`` puts the Point_mutations columns (what changed, where, what it
+    means) first; ``with_mutation_summary`` adds a one-line description of each
+    mutation call after the category (All_hits).
+    """
+    raw = [(t, a) for t, a in HIT_COLUMNS if not (mutations and a in _MUTATION_RAW_SKIP)]
     lead_titles = [title for title, _ in leading]
-    titles = lead_titles + (["Category"] if with_category else []) + [t for t, _ in HIT_COLUMNS]
+    mutation_titles = [t for t, _f, _w in MUTATION_COLUMNS] if mutations else []
+    titles = (lead_titles + (["Category"] if with_category else [])
+              + (["Mutation: what changed"] if with_mutation_summary else [])
+              + mutation_titles + [t for t, _ in raw])
     _write_header(ws, 1, titles)
     identity_col = titles.index("Identity (%)") + 1
     row = 1
     for item in hits:
         hit, lead_values = (item if isinstance(item, tuple) else (item, ()))
         row += 1
-        values = list(lead_values) + ([category(hit)] if with_category else []) + hit_values(hit)
+        values = (list(lead_values) + ([category(hit)] if with_category else [])
+                  + ([_clean(mutation_summary(hit))] if with_mutation_summary else [])
+                  + (mutation_values(hit) if mutations else [])
+                  + [v for (t, a), v in zip(HIT_COLUMNS, hit_values(hit))
+                     if not (mutations and a in _MUTATION_RAW_SKIP)])
         for col, value in enumerate(values, start=1):
             cell = ws.cell(row=row, column=col, value=value)
             cell.border = CELL_BORDER
             if not hit.primary:
                 cell.font = REDUNDANT_FONT
+        if mutations:
+            first = len(lead_titles) + (1 if with_category else 0) + 1
+            for offset, (_title, field_name, _width) in enumerate(MUTATION_COLUMNS):
+                cell = ws.cell(row=row, column=first + offset)
+                if field_name in ("symbol", "type_label"):
+                    cell.fill = _fill(type_colour(hit))
+                    cell.font = Font(bold=field_name == "symbol")
+                elif field_name == "reference_inferred" and cell.value:
+                    cell.fill = _fill(INFERRED_FILL)
+                if field_name in ("description", "nucleotide_basis", "unresolved"):
+                    cell.alignment = Alignment(wrap_text=True, vertical="top")
         id_cell = ws.cell(row=row, column=identity_col)
         colour = MUTATION_COLOUR if category(hit) == MUTATION else identity_colour(hit.identity_pct)
         if colour:
             id_cell.fill = _fill(colour)
         if hit.resolution == "PARTIAL":
             ws.cell(row=row, column=identity_col + 1).font = PARTIAL_FONT
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = "B2" if mutations else "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(titles))}{max(row, 1)}"
     _autosize(ws, maximum=50)
+    if mutations:
+        first = len(lead_titles) + (1 if with_category else 0) + 1
+        for offset, (_title, _field, width) in enumerate(MUTATION_COLUMNS):
+            ws.column_dimensions[get_column_letter(first + offset)].width = width
+        for offset in range(len(MUTATION_COLUMNS)):
+            ws.cell(row=1, column=first + offset).alignment = Alignment(
+                horizontal="center", vertical="center", wrap_text=True)
+        ws.row_dimensions[1].height = 48
+        inferred = titles.index("Reference codon (INFERRED by parsimony, no reference CDS)") + 1
+        ws.cell(row=1, column=inferred).comment = Comment(
+            "AMRFinderPlus ships reference proteins, not coding sequences, for the "
+            "point-mutation genes, so the reference codon cannot be read from a reference. "
+            "This is the codon for the reference amino acid that differs least from the "
+            "codon read in the isolate: an inference, not an observation.", "HYDRA-Win")
+    if with_mutation_summary:
+        col = titles.index("Mutation: what changed") + 1
+        ws.column_dimensions[get_column_letter(col)].width = 60
     return row - 1
 
 
@@ -276,13 +440,15 @@ def species_text(result: SampleResult) -> str:
     return result.species.name if result.species else "unknown"
 
 
-def headline(result: SampleResult) -> dict:
+def headline(result: SampleResult, missing: dict | None = None) -> dict:
     """The few numbers the window shows in a genome's row once it is done."""
     counts = category_counts(result)
     m = result.mlst
     st = m.sequence_type if m and m.sequence_type not in (None, "", "-") else "-"
     mlst = f"ST{st} ({m.scheme})" if st != "-" and m.scheme not in (None, "", "-") else (
         f"ST{st}" if st != "-" else "-")
+    if st == "-" and missing and "pubmlst" in missing:
+        mlst = "not typed (no PubMLST)"
     return {"species": species_text(result), "mlst": mlst, "amr": counts[AMR],
             "mutations": counts[MUTATION], "virulence": counts[VIRULENCE],
             "plasmids": counts[PLASMID]}
@@ -302,6 +468,21 @@ class RunInfo:
     #: The user-adjustable settings actually used (label -> value), so every
     #: result can be traced to its thresholds.
     settings: dict = field(default_factory=dict)
+    #: database -> what could not be done without it. Stated in every Summary
+    #: sheet so a missing database is never read as a negative result.
+    missing_analyses: dict = field(default_factory=dict)
+
+
+NOT_TYPED = "not typed: PubMLST schemes not installed (not a negative result)"
+MISSING_FILL = "F8CBAD"
+
+
+def mlst_text(result: SampleResult, missing: dict | None = None) -> str:
+    """The ST, or why there is none when PubMLST is not installed."""
+    st = result.mlst.sequence_type
+    if missing and "pubmlst" in missing and st in (None, "", "-"):
+        return NOT_TYPED
+    return st
 
 
 def _kv(ws: Worksheet, row: int, key: str, value, *, colour: str | None = None) -> int:
@@ -327,6 +508,11 @@ def _section(ws: Worksheet, row: int, title: str) -> int:
 def write_genome_summary(ws: Worksheet, result: SampleResult, info: RunInfo) -> None:
     ws.cell(row=1, column=1, value=f"HYDRA-Win report: {result.sample}").font = TITLE_FONT
     row = 3
+    if info.missing_analyses:
+        row = _section(ws, row, "Analyses NOT performed (database not installed)")
+        for name, impact in info.missing_analyses.items():
+            row = _kv(ws, row, name, impact, colour=MISSING_FILL)
+        row += 1
     row = _section(ws, row, "Identification")
     row = _kv(ws, row, "Assembly", result.sample)
     row = _kv(ws, row, "Input file", "; ".join(Path(p).name for p in result.inputs))
@@ -337,7 +523,8 @@ def write_genome_summary(ws: Worksheet, result: SampleResult, info: RunInfo) -> 
     row = _kv(ws, row, "Mutation catalogue (AMRFinderPlus organism)", sp.organism or "-")
     m = result.mlst
     row = _kv(ws, row, "MLST scheme", m.scheme)
-    row = _kv(ws, row, "MLST ST", m.sequence_type)
+    st = mlst_text(result, info.missing_analyses)
+    row = _kv(ws, row, "MLST ST", st, colour=MISSING_FILL if st == NOT_TYPED else None)
     row = _kv(ws, row, "MLST profile", m.profile)
     row = _kv(ws, row, "MLST loci found",
               f"{m.loci_found}/{m.loci_total}" if m.loci_total else "-")
@@ -346,24 +533,36 @@ def write_genome_summary(ws: Worksheet, result: SampleResult, info: RunInfo) -> 
 
     row += 1
     row = _section(ws, row, "Scores")
-    for key, label in SCORE_LABELS.items():
+    for key, title in SCORE_LABELS.items():
         if key in result.scores:
-            row = _kv(ws, row, label, result.scores[key])
+            row = _kv(ws, row, title, result.scores[key])
 
     row += 1
     row = _section(ws, row, "Counts (distinct genes, primary calls)")
     counts = category_counts(result)
-    for cat, label in COUNT_LABELS.items():
-        row = _kv(ws, row, label, counts[cat], colour=CATEGORY_COLOURS[cat])
+    for cat, title in COUNT_LABELS.items():
+        row = _kv(ws, row, title, counts[cat], colour=CATEGORY_COLOURS[cat])
     row = _kv(ws, row, "AMR drug classes", len(amr_classes(result)))
     row = _kv(ws, row, "All hits (incl. redundant database calls)", len(result.hits))
 
     row += 1
     row = _section(ws, row, "Detected (primary calls)")
     for cat in (AMR, STRESS, MUTATION, VIRULENCE, PLASMID):
-        genes = primary_genes(result, cat)
-        row = _kv(ws, row, f"{COUNT_LABELS[cat]} (names)", ", ".join(genes) if genes else "none")
+        genes = mutation_lines(result) if cat == MUTATION else primary_genes(result, cat)
+        row = _kv(ws, row, f"{COUNT_LABELS[cat]} (names)",
+                  ("; " if cat == MUTATION else ", ").join(genes) if genes else "none")
     row = _kv(ws, row, "AMR drug classes (names)", ", ".join(amr_classes(result)) or "none")
+
+    row += 1
+    row = _section(ws, row, "Point mutations and gene disruptions: what changed")
+    calls = sort_hits(h for h in result.hits if h.primary and category(h) == MUTATION)
+    if not calls:
+        row = _kv(ws, row, "Point mutations / disruptions", "none detected")
+    for hit in calls:
+        detail = mutation_detail(hit)
+        text = (detail.description or mutation_summary(hit)) if detail is not None \
+            else mutation_summary(hit)
+        row = _kv(ws, row, label(hit), text, colour=type_colour(hit))
 
     row += 1
     row = _section(ws, row, "Typing")
@@ -378,27 +577,27 @@ def write_genome_summary(ws: Worksheet, result: SampleResult, info: RunInfo) -> 
 
     row += 1
     row = _section(ws, row, "Assembly QC")
-    for key, label in QC_LABELS.items():
+    for key, title in QC_LABELS.items():
         if key in result.qc:
-            row = _kv(ws, row, label, result.qc[key])
+            row = _kv(ws, row, title, result.qc[key])
     row = _kv(ws, row, "Warnings", "; ".join(result.warnings) or "none")
 
     row += 1
     row = _section(ws, row, "Settings used")
     if info.settings:
-        for label, value in info.settings.items():
-            row = _kv(ws, row, label, value)
+        for title, value in info.settings.items():
+            row = _kv(ws, row, title, value)
     else:
         row = _kv(ws, row, "Settings", "not recorded")
 
     row += 1
     row = _section(ws, row, "Run")
-    for label, value in (("HYDRA-Win version", info.app_version),
+    for title, value in (("HYDRA-Win version", info.app_version),
                          ("Upstream Hydra", info.upstream), ("Date", info.date),
                          ("Databases (version)", info.databases),
                          ("Databases not available", info.missing_databases or "none"),
                          ("Thresholds", info.thresholds), ("Notes", info.notes)):
-        row = _kv(ws, row, label, value)
+        row = _kv(ws, row, title, value)
     ws.column_dimensions["A"].width = 44
     ws.column_dimensions["B"].width = 100
     ws.freeze_panes = "A3"
@@ -512,7 +711,8 @@ def write_pivot(ws: Worksheet, result: SampleResult, databases: Sequence[str]) -
         f"Virulence score: {scores.get('virulence_score', '-')}"))
     legend_row = 3
     ws.cell(row=legend_row, column=1, value="Cell = % identity of that database's call at the "
-                                            "locus. Legend:").font = Font(italic=True)
+                                            "locus (for a mutation: the change itself). "
+                                            "Legend:").font = Font(italic=True)
     col = 4
     for _floor, colour, band in IDENTITY_BANDS:
         cell = ws.cell(row=legend_row, column=col, value=band)
@@ -553,11 +753,17 @@ def write_pivot(ws: Worksheet, result: SampleResult, databases: Sequence[str]) -
             call = best_by_db.get(name)
             if call is None:
                 continue
-            cell.value = round(call.identity_pct, 1)
-            cell.number_format = "0.0"
-            cell.alignment = Alignment(horizontal="center")
-            cell.fill = _fill(MUTATION_COLOUR if cat == MUTATION
-                              else identity_colour(call.identity_pct))
+            if cat == MUTATION:
+                # A mutation row states the change, not the gene's identity.
+                cell.value = _clean(change_text(call))
+                cell.alignment = Alignment(horizontal="center", shrink_to_fit=True)
+                cell.fill = _fill(type_colour(call))
+                cell.comment = Comment(_clean(mutation_summary(call)), "HYDRA-Win")
+            else:
+                cell.value = round(call.identity_pct, 1)
+                cell.number_format = "0.0"
+                cell.alignment = Alignment(horizontal="center")
+                cell.fill = _fill(identity_colour(call.identity_pct))
             if call.resolution == "PARTIAL":
                 cell.font = PARTIAL_FONT
             if cat != MUTATION and call.gene != p.gene:
@@ -565,8 +771,11 @@ def write_pivot(ws: Worksheet, result: SampleResult, databases: Sequence[str]) -
         tail_col = 4 + len(db_columns)
         best = max(locus.calls, key=lambda h: h.identity_pct)
         strand = p.strand or "+"
-        values = (round(best.identity_pct, 2), round(p.coverage_pct, 2), len(best_by_db),
-                  f"{p.sequence}:{min(p.start, p.end)}-{max(p.start, p.end)} ({strand})")
+        where = f"{p.sequence}:{min(p.start, p.end)}-{max(p.start, p.end)} ({strand})"
+        detail = mutation_detail(p) if cat == MUTATION else None
+        if detail is not None and detail.location:
+            where = f"{detail.location}; gene {where}"
+        values = (round(best.identity_pct, 2), round(p.coverage_pct, 2), len(best_by_db), where)
         for offset, value in enumerate(values):
             cell = ws.cell(row=row, column=tail_col + offset, value=_clean(value))
             cell.border = CELL_BORDER
@@ -601,12 +810,12 @@ def write_genome_workbook(result: SampleResult, path: Path, info: RunInfo | None
     for sheet, cats in SHEET_CATEGORIES.items():
         chosen = [h for h in ordered if category(h) in cats]
         if sheet == "Point_mutations":
-            write_hit_table(wb.create_sheet(sheet), [(h, (label(h),)) for h in chosen],
-                            leading=(("Mutation", None),))
+            write_hit_table(wb.create_sheet(sheet), chosen, mutations=True)
         else:
             write_hit_table(wb.create_sheet(sheet), chosen, with_category=(sheet == "AMR_genes"))
     write_typing(wb.create_sheet("Typing"), result)
-    write_hit_table(wb.create_sheet("All_hits"), ordered, with_category=True)
+    write_hit_table(wb.create_sheet("All_hits"), ordered, with_category=True,
+                    with_mutation_summary=True)
     write_pivot(wb.create_sheet("Pivot"), result, databases)
     wb.save(path)
     return path
@@ -621,7 +830,8 @@ MATRICES = (
 )
 
 
-def cumulative_summary_rows(results: Sequence[SampleResult]) -> tuple[list[str], list[list]]:
+def cumulative_summary_rows(results: Sequence[SampleResult],
+                            missing: dict | None = None) -> tuple[list[str], list[list]]:
     typing_schemes: list[str] = []
     for result in results:
         for typing in result.typing:
@@ -639,7 +849,7 @@ def cumulative_summary_rows(results: Sequence[SampleResult]) -> tuple[list[str],
         typing = {t.scheme: t for t in result.typing}
         counts = category_counts(result)
         row = [result.sample, result.species.name, result.species.confidence,
-               result.mlst.scheme, result.mlst.sequence_type, result.mlst.profile]
+               result.mlst.scheme, mlst_text(result, missing), result.mlst.profile]
         for scheme in typing_schemes:
             t = typing.get(scheme)
             row.append("" if t is None else (
@@ -647,7 +857,7 @@ def cumulative_summary_rows(results: Sequence[SampleResult]) -> tuple[list[str],
         row += [_yes_no(result.scores.get(key, "")) for key in SCORE_LABELS]
         row += [counts[c] for c in COUNT_LABELS] + [len(amr_classes(result))]
         row += [", ".join(primary_genes(result, AMR) + primary_genes(result, STRESS)),
-                ", ".join(primary_genes(result, MUTATION)),
+                "; ".join(mutation_lines(result)),
                 ", ".join(primary_genes(result, VIRULENCE)),
                 ", ".join(primary_genes(result, PLASMID))]
         row += [result.qc.get("contigs"), result.qc.get("total_length"), result.qc.get("n50"),
@@ -731,6 +941,88 @@ def write_matrix(ws: Worksheet, results: Sequence[SampleResult], cats: Sequence[
     return len(columns)
 
 
+def mutation_matrix_data(results: Sequence[SampleResult]):
+    """(columns, cells): one column per gene; cells[sample][gene] = that gene's calls."""
+    cells: dict[str, dict[str, list[Hit]]] = {}
+    classes: dict[str, str] = {}
+    for result in results:
+        per = cells.setdefault(result.sample, {})
+        for hit in sort_hits(result.hits):
+            if not hit.primary or category(hit) != MUTATION:
+                continue
+            gene = hit.gene
+            detail = mutation_detail(hit)
+            resistance = (detail.resistance if detail is not None and detail.resistance
+                          else (hit.drug_class or "").lower())
+            classes.setdefault(gene, resistance)
+            per.setdefault(gene, []).append(hit)
+    columns = sorted(classes.items(), key=lambda kv: ((kv[1] or "~").upper(), kv[0].upper()))
+    return [(resistance, gene) for gene, resistance in columns], cells
+
+
+def _residue_number(hit: Hit) -> int:
+    """The position a change sits at, so one gene's changes read in order (S83L; D87N)."""
+    match = re.search(r"-?\d+", change_text(hit))
+    return int(match.group(0)) if match else 0
+
+
+def write_mutation_matrix(ws: Worksheet, results: Sequence[SampleResult], title: str) -> int:
+    """Assemblies x genes; each cell states the change(s) the assembly carries."""
+    columns, cells = mutation_matrix_data(results)
+    lead = ["Assembly", "Species", "ST", "Mutations (n)"]
+    first = len(lead) + 1
+    ws.cell(row=1, column=1, value=title).font = Font(bold=True)
+    ws.cell(row=1, column=2, value="Row 1: the resistance each gene's calls are associated "
+                                   "with. Cell: the change the assembly carries (empty = none "
+                                   "detected). Blue: substitution / rRNA / promoter; orange: gene "
+                                   "disruption; grey: gene cut by a contig end (not evidence)."
+            ).font = Font(italic=True)
+    for offset, (resistance, _gene) in enumerate(columns):
+        cell = ws.cell(row=2, column=first + offset, value=resistance or "-")
+        cell.alignment = Alignment(wrap_text=True, horizontal="center", vertical="bottom")
+        cell.font = Font(bold=True, color="1F4E78")
+        cell.fill = SECTION_FILL
+    _write_header(ws, 3, lead + [gene for _r, gene in columns])
+    ws.row_dimensions[2].height = 60
+    for r, result in enumerate(results, start=4):
+        per = cells.get(result.sample, {})
+        n = sum(len(v) for v in per.values())
+        for c, value in enumerate([result.sample, result.species.name, result.mlst.sequence_type,
+                                   n], start=1):
+            cell = ws.cell(row=r, column=c, value=_clean(value))
+            cell.border = CELL_BORDER
+        for offset, (_r, gene) in enumerate(columns):
+            cell = ws.cell(row=r, column=first + offset)
+            cell.border = CELL_BORDER
+            hits = per.get(gene)
+            if not hits:
+                continue
+            hits = sorted(hits, key=_residue_number)
+            cell.value = _clean("; ".join(change_text(h) for h in hits))
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            colours = {type_colour(h) for h in hits}
+            cell.fill = _fill(DISRUPTION_COLOUR if DISRUPTION_COLOUR in colours
+                              else next(iter(colours)))
+            if all(type_colour(h) == CONTIG_END_COLOUR for h in hits):
+                cell.font = Font(italic=True, color="595959")
+            cell.comment = Comment(_clean("\n".join(mutation_summary(h) for h in hits)),
+                                   "HYDRA-Win")
+    last_col = max(len(lead), len(lead) + len(columns))
+    ws.freeze_panes = ws.cell(row=4, column=first)
+    ws.auto_filter.ref = f"A3:{get_column_letter(last_col)}{3 + len(results)}"
+    ws.column_dimensions["A"].width = max(12, min(50, max((len(r.sample) for r in results),
+                                                          default=10) + 2))
+    ws.column_dimensions["B"].width = 26
+    ws.column_dimensions["C"].width = 8
+    ws.column_dimensions["D"].width = 11
+    for offset in range(len(columns)):
+        ws.column_dimensions[get_column_letter(first + offset)].width = 17
+    if not columns:
+        ws.cell(row=4 + len(results), column=1,
+                value="No point mutations or disruptions in any assembly.").font = Font(italic=True)
+    return len(columns)
+
+
 def write_cumulative_workbook(results: Sequence[SampleResult], path: Path,
                               info: RunInfo | None = None) -> Path:
     info = info or RunInfo()
@@ -739,7 +1031,7 @@ def write_cumulative_workbook(results: Sequence[SampleResult], path: Path,
     wb = Workbook()
     ws = wb.active
     ws.title = "Summary"
-    titles, rows = cumulative_summary_rows(results)
+    titles, rows = cumulative_summary_rows(results, info.missing_analyses)
     _write_header(ws, 1, titles)
     for r, values in enumerate(rows, start=2):
         for c, value in enumerate(values, start=1):
@@ -749,8 +1041,10 @@ def write_cumulative_workbook(results: Sequence[SampleResult], path: Path,
     ws.auto_filter.ref = f"A1:{get_column_letter(len(titles))}{len(rows) + 1}"
     _autosize(ws, maximum=60)
     note_row = len(rows) + 3
-    run_rows = [("HYDRA-Win", info.app_version), ("Upstream Hydra", info.upstream),
-                ("Date", info.date), ("Databases", info.databases)]
+    run_rows = [(f"NOT PERFORMED ({name} not installed)", impact)
+                for name, impact in info.missing_analyses.items()]
+    run_rows += [("HYDRA-Win", info.app_version), ("Upstream Hydra", info.upstream),
+                 ("Date", info.date), ("Databases", info.databases)]
     run_rows += list(info.settings.items())
     run_rows += [("Thresholds", info.thresholds), ("Notes", info.notes)]
     for label, value in run_rows:
@@ -759,13 +1053,17 @@ def write_cumulative_workbook(results: Sequence[SampleResult], path: Path,
         note_row += 1
 
     for sheet, cats in MATRICES:
-        write_matrix(wb.create_sheet(sheet), results, cats, sheet.replace("_", " "))
+        if MUTATION in cats:
+            write_mutation_matrix(wb.create_sheet(sheet), results, sheet.replace("_", " "))
+        else:
+            write_matrix(wb.create_sheet(sheet), results, cats, sheet.replace("_", " "))
 
     long_rows = []
     for result in results:
         for hit in sort_hits(result.hits):
             long_rows.append((hit, (result.sample,)))
     write_hit_table(wb.create_sheet("All_hits"), long_rows,
-                    leading=(("Assembly", None),), with_category=True)
+                    leading=(("Assembly", None),), with_category=True,
+                    with_mutation_summary=True)
     wb.save(path)
     return path

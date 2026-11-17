@@ -28,6 +28,28 @@ upstream src/hydra_amr over this directory and re-apply these hunks.
                 with stdin detached and, on Windows, CREATE_NO_WINDOW, so no
                 console window flashes during a database download.
 
+3. Mutation detail (what exactly mutated), additive; proposed to upstream as a
+   pull request with the identical engine code, so this entry disappears at the
+   next re-vendor once it is merged:
+     engines/lesions.py  NEW. For every call already made, reads the assembly at
+                         the place the alignment points to and names the change:
+                         codon/base read from the contig (alignment walked, strand
+                         and indels handled), reference base from the DNA
+                         catalogue's reference sequence or a parsimony inference
+                         labelled as such, AMRFinderPlus/HGVS/Kleborate names,
+                         disruption lesion (stop, frameshift, interruption, start
+                         loss, contig end), resistance in words.
+     records.py          MutationDetail record; Hit gains `mutation` (the detail)
+                         and `evidence` (alignment, never written out); as_row()
+                         and HIT_COLUMNS gain the detail columns at the end.
+     engines/protein.py  the three mutation callers attach `evidence` to the Hit
+                         they already build (POINTX, POINTN, DISRUPTX); the DNA
+                         caller keeps the reference sequences it already reads.
+     pipeline.py         one call to lesions.describe_mutations() per assembly
+                         after screening.
+   Which mutations are called is unchanged: tools/compare_upstream.py matches
+   upstream at the commit above on every existing field.
+
 Nothing else is changed. Upstream modules Hydra-win does not import
 (cli.py, report/, engines/reads.py's read-mapping code paths) are kept so the
 copy stays diffable against upstream; the read engine imports pysam lazily and

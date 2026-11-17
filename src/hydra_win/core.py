@@ -25,7 +25,7 @@ from hydra_amr.records import SampleResult
 from hydra_amr.utils import HydraError, cpu_count
 
 from . import (APP_NAME, UPSTREAM_COMMIT, UPSTREAM_URL, __version__, databases, excel, mashlite,
-               runtime, winsafe)
+               netfetch, runtime, winsafe)
 
 LOG = logging.getLogger("hydra")
 
@@ -416,10 +416,13 @@ class AnalysisResult:
     genomes: list[Genome] = field(default_factory=list)
     failed: dict[str, str] = field(default_factory=dict)
     settings: Settings = field(default_factory=Settings)
+    #: database -> what this run could not do without it (never a negative result).
+    missing_analyses: dict[str, str] = field(default_factory=dict)
 
 
 def ensure_databases(progress: ProgressFn | None = None, offline: bool = False) -> dict[str, str]:
     """Download whatever first-launch database is missing. Returns failures."""
+    netfetch.install()
     rt = runtime.prepare()
     store = DatabaseStore(rt.db_root)
     todo = databases.missing(store)
@@ -466,6 +469,7 @@ def _run_info(store: DatabaseStore, used: Sequence[str], missing: Sequence[str],
         thresholds=thresholds,
         notes=f"{SPECIES_NOTE} {READS_NOTE}",
         settings=settings.describe(used),
+        missing_analyses=databases.missing_analyses(store),
     )
 
 
@@ -532,6 +536,8 @@ def _analyse(rt, inputs, outdir: Path, cumulative: bool, settings: Settings, off
     if missing:
         LOG.warning("databases not available for this run: %s%s", ", ".join(missing),
                     "" if not failures else " (download failed; they are retried next run)")
+        for name, impact in databases.missing_analyses(store).items():
+            LOG.warning("not performed (%s missing): %s", name, impact)
     LOG.info("screening against: %s", ", ".join(used))
 
     config = Config(db_dir=rt.db_root, threads=settings.resolved_threads(), plus=True,
@@ -587,6 +593,8 @@ def _analyse(rt, inputs, outdir: Path, cumulative: bool, settings: Settings, off
             LOG.info("wrote %s", path)
             LOG.info("%s: %s, %s ST%s, %d primary calls", result.sample, result.species.name,
                      result.mlst.scheme, result.mlst.sequence_type, len(primary))
+            LOG.info("%s: point mutations / disruptions: %s", result.sample,
+                     "; ".join(excel.mutation_lines(result)) or "none")
             notify(GenomeEvent(genome, "done", fraction=1.0, result=result, workbook=path))
     finally:
         if not keep_temp:
@@ -609,4 +617,4 @@ def _analyse(rt, inputs, outdir: Path, cumulative: bool, settings: Settings, off
     return AnalysisResult(outdir=outdir, results=results, workbooks=workbooks,
                           cumulative=cumulative_path, log_path=log_path, databases=used,
                           missing_databases=missing, genomes=genomes, failed=failed,
-                          settings=settings)
+                          settings=settings, missing_analyses=dict(info.missing_analyses))

@@ -22,7 +22,7 @@ a = Analysis(
     pathex=[str(SRC)],
     binaries=binaries,
     datas=datas,
-    hiddenimports=["hydra_amr.db.fetch", "tkinterdnd2"],
+    hiddenimports=["hydra_amr.db.fetch", "tkinterdnd2", "truststore"],
     excludes=["pandas", "scipy", "matplotlib", "pysam", "IPython", "pytest",
               "hydra_amr.report", "hydra_amr.cli"],
     noarchive=False,

@@ -5,8 +5,10 @@
     ci.py build-db DIST             build the bundled databases with the packaged exe
     ci.py package DIST ZIP          clean scratch files and zip the app folder
     ci.py smoke ZIP WORK            unzip into an awkward path, run --cli on public
-                                    genomes with --cumulative, assert the workbooks;
-                                    then a run with custom thresholds and FASTQ inputs
+                                    genomes with --cumulative, assert the workbooks and
+                                    re-read every reported codon from the FASTA; then a
+                                    run with custom thresholds and FASTQ inputs; then a
+                                    fresh unzip run --offline (bundled databases only)
     ci.py display WIDTH HEIGHT      set the runner's screen resolution (best effort)
     ci.py gui-smoke WORK            drive the real window of the unzipped app: add the
                                     genomes, open the settings, drop FASTQ files, click
@@ -49,11 +51,19 @@ GENOMES = {
              "GCF_000285655.3_EC958.v1/GCF_000285655.3_EC958.v1_genomic.fna.gz",
 }
 #: What the literature says these two genomes carry.
+#: Point mutations and disruptions are the ones AMRFinderPlus 4.2.7 (database
+#: 2026-05-15.1) reports for these genomes, under the same names.
 EXPECT = {
     "HS11286": {"species": "Klebsiella pneumoniae", "st": "11",
-                "genes": ["blaKPC-2", "blaCTX-M-14"], "mutations": ["gyrA_S83I"]},
+                "genes": ["blaKPC-2", "blaCTX-M-14"],
+                "mutations": ["gyrA_S83I", "parC_S80I", "ompK35_G134AfsTer11",
+                              "cirA_N467MfsTer15"],
+                "matrix": {"gyrA": "S83I", "ompK35": "G134AfsTer11"}},
     "EC958": {"species": "Escherichia coli", "typing": {"ST achtman": "131"},
-              "genes": ["blaCTX-M-15", "blaOXA-1"], "mutations": ["gyrA_S83L", "parC_S80I"]},
+              "genes": ["blaCTX-M-15", "blaOXA-1"],
+              "mutations": ["gyrA_S83L", "gyrA_D87N", "parC_S80I", "parC_E84V", "parE_I529L",
+                            "ptsI_V25I", "uhpT_E350Q"],
+              "matrix": {"gyrA": "S83L; D87N"}},
 }
 GENOME_SHEETS = ("Summary", "AMR_genes", "Point_mutations", "Virulence", "Plasmids",
                  "Typing", "All_hits", "Pivot")
@@ -79,13 +89,15 @@ def download(url: str, dest: Path, attempts: int = 4) -> Path:
     raise SystemExit(f"could not download {url}")
 
 
-def run_exe(exe: Path, args: list[str], timeout: int, log_file: Path | None = None) -> int:
+def run_exe(exe: Path, args: list[str], timeout: int, log_file: Path | None = None,
+            env_extra: dict | None = None) -> int:
     """Run the windowed exe, stream its log file while it runs, return its exit code."""
     log(f"running {exe.name} {' '.join(args)}")
     started = time.time()
     # The exe must not lean on the runner's Python settings (UTF-8 mode in particular).
     env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
     env["HYDRA_WIN_HANG_DUMP"] = "300"
+    env.update(env_extra or {})
     out_path = Path(os.environ.get("RUNNER_TEMP", ".")) / f"exe-output-{os.getpid()}.txt"
     with open(out_path, "w", encoding="utf-8") as out:
         proc = subprocess.Popen([str(exe), *args], stdout=out, stderr=subprocess.STDOUT, env=env)
@@ -224,8 +236,14 @@ def fetch_genomes(folder: Path) -> list[Path]:
     return [hs, ec]
 
 
-def assert_outputs(out: Path) -> list[str]:
+def genome_files(folder: Path) -> dict[str, Path]:
+    return {p.name.split(".")[0]: p for p in sorted(folder.glob("*")) if p.is_file()}
+
+
+def assert_outputs(out: Path, genomes: dict[str, Path] | None = None) -> list[str]:
     from openpyxl import load_workbook  # noqa: PLC0415
+
+    from verify_mutations import verify  # noqa: PLC0415 - tools/ is on sys.path
 
     problems: list[str] = []
     for genome, expect in EXPECT.items():
@@ -250,11 +268,24 @@ def assert_outputs(out: Path) -> list[str]:
         for gene in expect["genes"]:
             if gene not in genes:
                 problems.append(f"{genome}: expected gene {gene} not found")
-        mutations = {r["Mutation"] for r in _rows(wb["Point_mutations"])}
+        point = _rows(wb["Point_mutations"])
+        mutations = {r["Mutation"] for r in point}
         for mutation in expect["mutations"]:
             if mutation not in mutations:
                 problems.append(f"{genome}: expected mutation {mutation} not found "
                                 f"(have {sorted(mutations)})")
+        for r in point:
+            # Every call states what changed, where, and what it is associated with.
+            for column in ("Type of call", "Mutation position on contig",
+                           "Resistance it is associated with", "What it means"):
+                if not r.get(column):
+                    problems.append(f"{genome}: {r['Mutation']} has no {column!r}")
+        # Independent check: every reported codon re-read from the FASTA itself.
+        if genomes and genome in genomes:
+            checked, found = verify(book, genomes[genome])
+            problems += [f"{genome}: {p}" for p in found]
+            log(f"{genome}: {checked} mutation rows re-read from {genomes[genome].name}: "
+                f"{'OK' if not found else f'{len(found)} problem(s)'}")
         if not _rows(wb["Virulence"]):
             problems.append(f"{genome}: Virulence sheet empty")
         if not _rows(wb["Plasmids"]):
@@ -292,6 +323,12 @@ def assert_outputs(out: Path) -> list[str]:
                 problems.append("cumulative AMR_matrix: HS11286 x blaKPC-2 empty")
             if matrix.get("EC958", {}).get("blaKPC-2"):
                 problems.append("cumulative AMR_matrix: EC958 x blaKPC-2 should be empty")
+            mut = {r["Assembly"]: r for r in _rows(wb["Mutations_matrix"], header_row=3)}
+            for genome, expect in EXPECT.items():
+                for gene, change in expect.get("matrix", {}).items():
+                    if mut.get(genome, {}).get(gene) != change:
+                        problems.append(f"cumulative Mutations_matrix: {genome} x {gene} = "
+                                        f"{mut.get(genome, {}).get(gene)!r}, expected {change!r}")
             long = _rows(wb["All_hits"])
             if not long or {r["Assembly"] for r in long} != set(EXPECT):
                 problems.append("cumulative All_hits does not cover both assemblies")
@@ -327,7 +364,7 @@ def cmd_smoke(zip_path: Path, work: Path) -> None:
             raise SystemExit("the packaged exe is not running in Python UTF-8 mode")
     if rc != 0:
         raise SystemExit(f"{APP} --cli exited with {rc}")
-    problems = assert_outputs(out)
+    problems = assert_outputs(out, genome_files(work / "genomes ö dir"))
     for problem in problems:
         log(f"PROBLEM: {problem}")
     shutil.copytree(out, work / "smoke-results", dirs_exist_ok=True)
@@ -335,6 +372,79 @@ def cmd_smoke(zip_path: Path, work: Path) -> None:
         raise SystemExit(f"{len(problems)} smoke-test problem(s)")
     log("smoke test passed")
     smoke_settings(app, genomes[0], work)
+    smoke_offline(zip_path, work, genomes[1])
+
+
+#: What the zip itself must hold, and what only a first-launch download provides.
+BUNDLED = {"protein", "ncbi", "resfinder", "plasmidfinder", "sccmec", "lineage", "species",
+           "vfdb", "argannot", "megares", "ecoli_vf", "ecoh"}
+DOWNLOADED = {"pubmlst", "card"}
+
+
+def smoke_offline(zip_path: Path, work: Path, genome: Path) -> None:
+    """A fresh unzip that cannot download: the bundled databases do all the work and the
+    two download-only ones are reported as missing, never as empty results."""
+    from openpyxl import load_workbook  # noqa: PLC0415
+
+    from verify_mutations import verify  # noqa: PLC0415
+
+    parent = work / "offline app ü"
+    shutil.rmtree(parent, ignore_errors=True)
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(parent)
+    app = next(parent.glob(f"*/{APP}.exe"))
+    problems = []
+    # Its own home: the first smoke run's home (with the downloads) must not be shared.
+    home = work / "offline_home"
+    shutil.rmtree(home, ignore_errors=True)
+    fresh = {"HYDRA_WIN_HOME": str(home)}
+    status_file = work / "offline-db-status.json"
+    run_exe(app, ["--db-status", str(status_file)], timeout=300, env_extra=fresh)
+    status = json.loads(status_file.read_text(encoding="utf-8"))
+    installed = {d["name"] for d in status["databases"] if d["installed"]}
+    missing = {d["name"] for d in status["databases"] if not d["installed"]}
+    if installed != BUNDLED or missing != DOWNLOADED:
+        problems.append(f"fresh unzip: installed {sorted(installed)}, missing {sorted(missing)}")
+    out = work / "results offline"
+    shutil.rmtree(out, ignore_errors=True)
+    log_file = work / "smoke-offline.log"
+    rc = run_exe(app, ["--cli", str(genome), "--out", str(out), "--offline", "--log",
+                       str(log_file)], timeout=1800, log_file=log_file, env_extra=fresh)
+    if rc != 0:
+        raise SystemExit(f"offline --cli exited with {rc}")
+    name = genome.name.split(".")[0]
+    book = out / name / f"{name}.xlsx"
+    wb = load_workbook(book)
+    summary = {r[0]: r[1] for r in wb["Summary"].iter_rows(values_only=True) if r[0]}
+    if "Analyses NOT performed (database not installed)" not in summary:
+        problems.append("offline Summary does not list the analyses not performed")
+    if not str(summary.get("pubmlst", "")).startswith("NO MLST"):
+        problems.append(f"offline Summary pubmlst row {summary.get('pubmlst')!r}")
+    if "CARD not screened" not in str(summary.get("card", "")):
+        problems.append(f"offline Summary card row {summary.get('card')!r}")
+    if not str(summary.get("MLST ST", "")).startswith("not typed"):
+        problems.append(f"offline MLST ST {summary.get('MLST ST')!r} reads like a result")
+    if summary.get("Species") != EXPECT[name]["species"]:
+        problems.append(f"offline species {summary.get('Species')!r}")
+    hits = _rows(wb["All_hits"])
+    used = {h["Database"] for h in hits}
+    wanted = {"ncbi", "protein", "resfinder", "argannot", "megares", "vfdb", "ecoli_vf",
+              "plasmidfinder", "ecoh"}
+    if not wanted <= used:
+        problems.append(f"offline run: no hits from {sorted(wanted - used)}")
+    if "card" in used:
+        problems.append("offline run reported CARD hits without CARD")
+    checked, found = verify(book, genome)
+    problems += [f"offline: {p}" for p in found]
+    text = log_file.read_text(encoding="utf-8", errors="replace")
+    if "not performed (pubmlst missing)" not in text:
+        problems.append("the offline log does not say MLST was not performed")
+    log(f"offline: {len(installed)} bundled databases, missing {sorted(missing)}; "
+        f"hits from {sorted(used)}; {checked} mutation rows verified")
+    for problem in problems:
+        log(f"PROBLEM: {problem}")
+    if problems:
+        raise SystemExit(f"{len(problems)} offline problem(s)")
 
 
 def fake_reads(folder: Path, n: int = 6) -> Path:
@@ -517,7 +627,7 @@ def cmd_gui_smoke(work: Path) -> None:
         problems.append(f"HS11286 MLST cell {rows.get('HS11286', {}).get('mlst')!r}")
     if not finished.get("status", "").startswith("Finished: 2 of 2 genomes analysed"):
         problems.append(f"status line {finished.get('status')!r}")
-    problems += assert_outputs(out)
+    problems += assert_outputs(out, genome_files(work / "genomes ö dir"))
     cli_out = work / "smoke-results"
     for genome in EXPECT:
         if (cli_out / genome).exists() and (out / genome).exists():
@@ -535,8 +645,11 @@ def cmd_gui_smoke(work: Path) -> None:
     if window[0] < left or window[1] < top or window[2] > right or window[3] > bottom \
             or screen.get("log_bottom", 10 ** 6) > bottom:
         problems.append("the window or its log does not fit on the screen")
+    dbs = data.get("databases", {})
+    if len(dbs.get("rows", [])) != 14 or not all(r["installed"] for r in dbs.get("rows", [])):
+        problems.append(f"Databases dialog: {dbs}")
     wanted = ["1-empty", "2-genomes-loaded", "3-settings-open", "4-fastq-notice", "5-running",
-              "6-finished"]
+              "6-finished", "7-databases"]
     for name in wanted:
         png = shots / f"{name}.png"
         if not png.exists() or png.stat().st_size < 10_000:

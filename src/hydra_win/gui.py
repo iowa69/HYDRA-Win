@@ -285,6 +285,9 @@ class App:
         self.dnd_enabled = False
         self.settings = core.Settings()
         self.settings_dialog: SettingsDialog | None = None
+        self.db_dialog: DatabasesDialog | None = None
+        #: database -> what a run cannot do without it (from the last check).
+        self.missing_dbs: dict[str, str] = {}
         self.notice_text = ""
         #: Per-file state from the current/last run, keyed by normalised path.
         self.row_state: dict[str, dict] = {}
@@ -549,6 +552,9 @@ class App:
         head = ttk.Frame(frame)
         head.pack(fill="x")
         ttk.Label(head, text="Log", style="Muted.TLabel").pack(side="left")
+        self.db_link = _Link(head, "Databases…", self.show_databases, bg=C["bg"],
+                             fg=C["accent"], font=self.fonts["small"])
+        self.db_link.pack(side="right", padx=(int(8 * self.scale), 0))
         self.db_label = ttk.Label(head, text="Checking databases…", style="Muted.TLabel")
         self.db_label.pack(side="right")
         box = tk.Frame(frame, bg=C["border"])
@@ -790,6 +796,35 @@ class App:
         self.busy = False
         self._update_buttons()
 
+    def database_status(self) -> list[dict]:
+        """Per-database rows (installed, version, last failure reason, impact)."""
+        from hydra_amr.db.manager import DatabaseStore  # noqa: PLC0415
+
+        from . import databases, runtime  # noqa: PLC0415
+
+        return databases.status(DatabaseStore(runtime.prepare().db_root))
+
+    def refresh_db_status(self) -> list[dict]:
+        """Update the status line under the log from the database folder."""
+        try:
+            rows = self.database_status()
+        except Exception as exc:  # noqa: BLE001
+            self.db_label.configure(text="Database folder problem (see the log)")
+            self.append_log(f"Database check failed: {exc}")
+            return []
+        self.missing_dbs = {r["name"]: r["impact"] for r in rows if not r["installed"]}
+        ok = len(rows) - len(self.missing_dbs)
+        if not self.missing_dbs:
+            self.db_label.configure(text=f"Databases: all {len(rows)} ready",
+                                    foreground=C["muted"])
+        else:
+            names = ", ".join(SHORT_MISSING.get(n, n) for n in self.missing_dbs)
+            self.db_label.configure(text=f"Databases: {ok} of {len(rows)} ready · missing: {names}",
+                                    foreground=C["fail"])
+        if self.db_dialog is not None:
+            self.db_dialog.fill(rows)
+        return rows
+
     def check_databases(self) -> None:
         from hydra_amr.db.manager import DatabaseStore  # noqa: PLC0415
 
@@ -802,8 +837,8 @@ class App:
             self.db_label.configure(text="Database folder problem (see the log)")
             self.append_log(f"Database check failed: {exc}")
             return
+        self.refresh_db_status()
         if not missing:
-            self.db_label.configure(text=f"Databases ready ({len(databases.ALL)})")
             return
         self.db_label.configure(text=f"Getting {len(missing)} database(s)…")
         self.append_log("First launch: getting the databases that cannot be shipped in the "
@@ -811,6 +846,42 @@ class App:
                         "one, otherwise by downloading them. This happens once and can take "
                         "several minutes.")
         self._start(self._download_worker)
+
+    def retry_downloads(self) -> None:
+        if self.busy:
+            return
+        self.append_log("Retrying the database downloads…")
+        self.db_label.configure(text="Downloading databases…", foreground=C["muted"])
+        self._start(self._download_worker)
+
+    def import_databases(self, folder: str | None = None) -> str:
+        """Install missing databases from a folder copied from another PC."""
+        from hydra_amr.db.manager import DatabaseStore  # noqa: PLC0415
+
+        from . import databases, runtime  # noqa: PLC0415
+
+        if folder is None:
+            folder = filedialog.askdirectory(
+                title="Folder copied from another PC (its 'db' folder, or the whole HYDRA-Win "
+                      "folder)", parent=self.db_dialog.win if self.db_dialog else self.root)
+        if not folder:
+            return ""
+        try:
+            _imported, message = databases.import_folder(
+                DatabaseStore(runtime.prepare().db_root), folder)
+        except Exception as exc:  # noqa: BLE001
+            message = f"import failed: {exc}"
+        self.append_log(f"Database import: {message}")
+        self.refresh_db_status()
+        return message
+
+    def show_databases(self) -> DatabasesDialog:
+        if self.db_dialog is not None:
+            self.db_dialog.win.lift()
+            self.db_dialog.fill(self.refresh_db_status())
+            return self.db_dialog
+        self.db_dialog = DatabasesDialog(self)
+        return self.db_dialog
 
     def _download_worker(self) -> None:
         try:
@@ -903,20 +974,24 @@ class App:
                               tag="running")
             elif e.status == "done":
                 self._set_row(e.genome, status="Done", tag="done",
-                              headline=excel.headline(e.result), workbook=e.workbook)
+                              headline=excel.headline(e.result, self.missing_dbs),
+                              workbook=e.workbook)
             elif e.status == "failed":
                 self._set_row(e.genome, status="Failed", tag="failed", error=e.error)
         elif kind == "db_done":
             self._finish()
             self._reset_bar()
             failures = event[1]
+            self.refresh_db_status()
             if failures:
-                self.db_label.configure(text=f"{len(failures)} database(s) unavailable")
-                self.status.configure(text="Some databases could not be downloaded; they are "
-                                           "retried at the next run. Analyses still work with "
-                                           "the others.")
+                for name, reason in failures.items():
+                    self.append_log(f"{name} could not be downloaded: {reason}")
+                missing = "; ".join(self.missing_dbs.values())
+                self.status.configure(text=(
+                    f"{', '.join(failures)} could not be downloaded (reason in the log and "
+                    "under Databases…; Retry there, or import a copy from another PC). Runs "
+                    f"go ahead without them: {missing}"))
             else:
-                self.db_label.configure(text="Databases ready")
                 self.status.configure(text="Ready")
         elif kind == "run_done":
             result: core.AnalysisResult = event[1]
@@ -931,6 +1006,9 @@ class App:
                     f"{books} workbook{'s' if books != 1 else ''} in {result.outdir}")
             if bad:
                 text += f". {bad} failed: see the log"
+            if result.missing_analyses:
+                text += ". Not performed: " + "; ".join(
+                    SHORT_MISSING.get(n, n) for n in result.missing_analyses)
             self.status.configure(text=text)
             self.open_button.configure(state="normal")
             if bad == n:
@@ -981,6 +1059,112 @@ class App:
                 parent=self.root):
             return
         self.root.destroy()
+
+
+#: What a missing database costs, in a few words for the status line.
+SHORT_MISSING = {"pubmlst": "PubMLST (no MLST)", "card": "CARD (not screened)",
+                 "protein": "AMRFinderPlus proteins (required)", "ncbi": "NCBI genes (required)"}
+
+
+class DatabasesDialog:
+    """Every database: how it is installed, its status or why it is missing."""
+
+    COLUMNS = (("title", "Database", 30), ("route", "How it is installed", 24),
+               ("status", "Status", 56))
+
+    def __init__(self, app: App):
+        self.app = app
+        f, s = app.fonts, app.scale
+        win = self.win = tk.Toplevel(app.root)
+        win.withdraw()
+        win.title("Databases")
+        win.configure(bg=C["card"])
+        win.transient(app.root)
+        pad = int(20 * s)
+        body = ttk.Frame(win, style="Card.TFrame", padding=(pad, int(pad * 0.8), pad, pad))
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text="Databases", font=f["h2"], bg=C["card"], fg=C["text"]).pack(
+            anchor="w")
+        tk.Label(body, font=f["small"], bg=C["card"], fg=C["muted"], justify="left",
+                 wraplength=int(760 * s),
+                 text="Twelve databases ship inside the zip. PubMLST and CARD do not allow "
+                      "redistribution, so they are downloaded on this PC the first time "
+                      "HYDRA-Win starts. If that fails (proxy, firewall), Retry, or copy the "
+                      "'db' folder from a PC where it worked and use Import from folder."
+                 ).pack(anchor="w", pady=(2, int(10 * s)))
+        frame = tk.Frame(body, bg=C["border"])
+        frame.pack(fill="both", expand=True)
+        self.tree = ttk.Treeview(frame, columns=[c for c, _h, _w in self.COLUMNS],
+                                 show="headings", height=14, selectmode="none")
+        char = max(6, int(f["base"].measure("0")))
+        for key, heading, width in self.COLUMNS:
+            self.tree.heading(key, text=heading, anchor="w")
+            self.tree.column(key, width=width * char, anchor="w", stretch=key == "status")
+        self.tree.tag_configure("missing", foreground=C["fail"])
+        self.tree.pack(fill="both", expand=True, padx=1, pady=1)
+        self.detail = tk.Label(body, text="", font=f["small"], bg=C["card"], fg=C["text"],
+                               justify="left", wraplength=int(760 * s))
+        self.detail.pack(anchor="w", pady=(int(8 * s), 0))
+        buttons = tk.Frame(body, bg=C["card"])
+        buttons.pack(fill="x", pady=(int(10 * s), 0))
+        self.retry_button = ttk.Button(buttons, text="Retry download", command=self.retry)
+        self.retry_button.pack(side="left")
+        ttk.Button(buttons, text="Import from folder…", command=self.import_folder).pack(
+            side="left", padx=(int(8 * s), 0))
+        ttk.Button(buttons, text="Close", style="Primary.TButton", command=self.close).pack(
+            side="right")
+        win.bind("<Escape>", lambda _e: self.close())
+        win.protocol("WM_DELETE_WINDOW", self.close)
+        self.rows = app.refresh_db_status()
+        self.fill(self.rows)
+        win.update_idletasks()
+        root = app.root
+        x = root.winfo_rootx() + (root.winfo_width() - win.winfo_reqwidth()) // 2
+        y = root.winfo_rooty() + max(0, (root.winfo_height() - win.winfo_reqheight()) // 4)
+        win.geometry(f"+{max(0, x)}+{max(0, y)}")
+        win.deiconify()
+        if app.quiet:
+            win.attributes("-topmost", True)
+
+    @staticmethod
+    def status_text(row: dict) -> str:
+        if row["installed"]:
+            version = row.get("version") or ""
+            when = (row.get("installed_on") or "")[:10]
+            return "Installed" + (f" · {version}" if version and version != "unknown" else "") + \
+                (f" · {when}" if when else "")
+        reason = row.get("reason") or "not installed"
+        return f"MISSING: {reason}"
+
+    def fill(self, rows: list[dict]) -> None:
+        self.rows = rows
+        self.tree.delete(*self.tree.get_children())
+        for row in rows:
+            route = "Bundled in the zip" if row["route"] == "bundled" else "Downloaded on this PC"
+            self.tree.insert("", "end", values=(row["title"], route, self.status_text(row)),
+                             tags=("missing",) if not row["installed"] else ())
+        missing = [r for r in rows if not r["installed"]]
+        self.detail.configure(
+            text=("Without the missing databases a run still completes, and says so in every "
+                  "Summary sheet: " + "; ".join(f"{r['title']}: {r['impact']}" for r in missing))
+            if missing else "Every database is installed.",
+            fg=C["fail"] if missing else C["ok"])
+        can_retry = any(not r["installed"] and r["route"] != "bundled" for r in rows)
+        self.retry_button.configure(state="normal" if can_retry and not self.app.busy
+                                    else "disabled")
+
+    def retry(self) -> None:
+        self.app.retry_downloads()
+        self.retry_button.configure(state="disabled")
+
+    def import_folder(self) -> None:
+        message = self.app.import_databases()
+        if message:
+            self.detail.configure(text=f"Import: {message}")
+
+    def close(self) -> None:
+        self.app.db_dialog = None
+        self.win.destroy()
 
 
 class SettingsDialog:
@@ -1231,6 +1415,15 @@ def _smoke(app: App, opts, report: dict):
         report["finished"] = {"rows": app.table_snapshot(),
                               "status": app.status.cget("text"),
                               "open_enabled": str(app.open_button["state"])}
+
+    dialog = app.show_databases()
+    yield 0.8
+    report["databases"] = {"label": app.db_label.cget("text"),
+                           "rows": [{"name": r["name"], "installed": r["installed"],
+                                     "route": r["route"], "status": dialog.status_text(r)}
+                                    for r in dialog.rows]}
+    yield ("shot", "7-databases")
+    dialog.close()
 
     root.update_idletasks()
     left, top, right, bottom = _work_area(root)
