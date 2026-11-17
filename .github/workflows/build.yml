@@ -8,6 +8,16 @@ on:
   pull_request:
   workflow_dispatch:
 
+# One build at a time. The database build now downloads about 1200 PubMLST
+# files, and two builds doing that at once from the same egress addresses draw
+# HTTP 429: the fetcher backs off, but a scheme that still comes back
+# incomplete is dropped, and then the bundle check fails for a reason that has
+# nothing to do with the commit. A tag build is never cancelled - that one
+# publishes the release.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 permissions:
   contents: read
 
