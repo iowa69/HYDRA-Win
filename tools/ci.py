@@ -493,10 +493,14 @@ def cmd_smoke(zip_path: Path, work: Path) -> None:
         raise SystemExit(f"{len(problems)} smoke-test problem(s)")
     log("smoke test passed")
     smoke_settings(app, genomes[0], work)
-    # The offline run gets the S. aureus genome: its typing data is bundled
-    # except for the Ridom spa database, so it is the case that proves both
-    # halves of the licence policy at once.
-    smoke_offline(zip_path, work, genomes[2])
+    # The offline run gets the E. coli genome, not the S. aureus one. Offline
+    # there is no PubMLST, so the species can only come from the bundled Mash
+    # sketches, and those cover Enterobacterales: a S. aureus comes back as
+    # "unknown" and no organism module is selected for it, which is correct
+    # behaviour and not what this test is for. E. coli is identified from the
+    # sketches, so its typing runs with no network at all - and its one
+    # GPL-3.0 database is the half of the licence policy this proves.
+    smoke_offline(zip_path, work, genomes[1])
 
 
 #: What the zip itself must hold, and what only a first-launch download provides.

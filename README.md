@@ -436,7 +436,12 @@ Two pieces are added for Windows:
 * **`vfdb_full` isn't used.** Upstream can't download it automatically, it overlaps
   with the core VFDB set, and it's by far the slowest search.
 * The species sketches cover Enterobacterales. Other genera are named from their MLST
-  scheme, as in upstream.
+  scheme, as in upstream — which means that **until the first-launch download has run,
+  only an Enterobacterales is identified to species**, and organism typing, which is
+  selected from the species call or the MLST scheme, is not applied to anything else.
+  After the download, every organism in the table above is identified and typed. The
+  window and the workbook say "no module for this species" rather than leaving it
+  blank.
 * PubMLST and CARD need an internet connection on the first launch, or a copy
   imported from another PC. So do the *spa* type, the *H. influenzae* capsule, the
   *Shigella*/EIEC cluster call and the whole *N. meningitidis* module (see
