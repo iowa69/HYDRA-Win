@@ -508,6 +508,17 @@ def assert_outputs(out: Path, genomes: dict[str, Path] | None = None) -> list[st
                            "Resistance it is associated with", "What it means"):
                 if not r.get(column):
                     problems.append(f"{genome}: {r['Mutation']} has no {column!r}")
+        # Where a reference tool names the same lesion, the row must carry that
+        # tool's own name for it: this is what "the call Kleborate makes" means.
+        by_name = {r["Mutation"]: r for r in point}
+        for mutation, expected_call in expect.get("kleborate", {}).items():
+            row = by_name.get(mutation)
+            if row is None:
+                problems.append(f"{genome}: no {mutation} row to carry the Kleborate call")
+            elif str(row.get("Kleborate-style call") or "") != expected_call:
+                problems.append(f"{genome}: {mutation} Kleborate-style call "
+                                f"{row.get('Kleborate-style call')!r}, expected "
+                                f"{expected_call!r}")
         # Independent check: every reported codon re-read from the FASTA itself.
         if genomes and genome in genomes:
             checked, found = verify(book, genomes[genome])
