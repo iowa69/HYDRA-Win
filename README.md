@@ -408,7 +408,7 @@ and in the cumulative `Summary` and `Typing_matrix` sheets.
 * **Eight meningococcal serogroups are validated against genomes with published
   serogroups** — A, B, C, W, X, Y, E and Z, plus the capsule-null locus, 18 genomes in
   all, tabulated with their sources in upstream's
-  [`docs/typing/hinf_nmen.md`](https://github.com/iowa69/hydra/blob/typing-integration/docs/typing/hinf_nmen.md).
+  [`docs/typing/hinf_nmen.md`](https://github.com/iowa69/hydra/blob/main/docs/typing/hinf_nmen.md).
   Serogroups **L and H are implemented but unvalidated** — no public assembly with a
   published L or H serogroup could be found — and a call of either says so in its own
   caveat rather than looking as solid as the other eight.
@@ -427,7 +427,7 @@ and in the cumulative `Summary` and `Typing_matrix` sheets.
   type" so it cannot be read as a group A type.
 * Full method, thresholds, provenance, validation tables and bibliography for every
   scheme are in upstream Hydra's
-  [`docs/typing/`](https://github.com/iowa69/hydra/tree/typing-integration/docs/typing).
+  [`docs/typing/`](https://github.com/iowa69/hydra/tree/main/docs/typing).
 
 With **Cumulative_results** (and two or more genomes), `<results>\Cumulative_results.xlsx`
 contains:
@@ -446,7 +446,7 @@ contains:
 
 HYDRA-Win runs upstream Hydra's own analysis code. It uses a pinned copy of
 `hydra_amr` from [iowa69/hydra](https://github.com/iowa69/hydra) at commit `75ecbe8`
-(branch `typing-integration`, open as pull requests #2 and #3), with two small,
+(merged, and released upstream as Hydra 1.4.0), with two small,
 documented Windows patches (see `src/hydra_amr/VENDORED.txt`). With Automatic settings,
 the calls match upstream's `--preset deep`:
 
