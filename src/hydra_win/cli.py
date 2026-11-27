@@ -139,8 +139,10 @@ def build_parser() -> argparse.ArgumentParser:
                              help="write the database status as JSON (to FILE or stdout) "
                                   "and exit")
     maintenance.add_argument("--import-db", type=Path, metavar="FOLDER",
-                             help="install missing databases (PubMLST, CARD) from a 'db' folder "
-                                  "copied from another PC where the download worked, and exit")
+                             help="install what the first launch downloads (CARD, the Ridom spa "
+                                  "database, hicap's cap database, ShigEiFinder) from a 'db' "
+                                  "folder copied from another PC where the download worked, "
+                                  "and exit")
     maintenance.add_argument("--build-db", type=Path, metavar="DIR",
                              help="build the redistributable (bundled) databases into DIR")
     maintenance.add_argument("--version", action="store_true", help="print the version and exit")
