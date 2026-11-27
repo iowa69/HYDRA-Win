@@ -30,9 +30,38 @@ upstream src/hydra_amr over this directory and re-apply these hunks.
                 with stdin detached and, on Windows, CREATE_NO_WINDOW, so no
                 console window flashes during a database download.
 
-Nothing else is changed, and there is no third entry any more: the mutation
-detail that v0.3.0 carried as a local patch is upstream code on the vendored
-branch (pull request #2), with the identical engine, and
+3. typing/organisms/registry.py - names_a_species() and one condition in
+                select(): the MLST scheme chooses an organism module only when
+                the species call does not name a species. HYDRA-Win's clinical
+                Mash sketch (hydra_win/data/clinical_species.msh) names species
+                that share a scheme with a neighbour - N. gonorrhoeae and
+                N. lactamica the "neisseria" scheme of N. meningitidis,
+                S. argenteus the "saureus" scheme - and without this a named
+                gonococcus would get the meningococcal module. A call that
+                names only a genus, a complex or a clade ("Neisseria sp.",
+                "Escherichia cryptic-clade-1") still falls back to the scheme.
+
+4. typing/species.py - for species only a sketch can name:
+                  * genus_level() and a branch in identify(): a scheme that
+                    names only a genus or a group in it ("neisseria",
+                    "Campylobacter jejuni/coli", "Burkholderia cepacia
+                    complex") takes the species from a sketch in the same
+                    genus at the species distance (0.05). Upstream's rule for
+                    a scheme that names a species is unchanged: only a sketch
+                    closer than 0.02 replaces it;
+                  * organism_for_name() gives N. gonorrhoeae and
+                    N. meningitidis their AMRFinderPlus taxgroups (their
+                    scheme is genus-level, so the scheme table cannot), and
+                    every member of the B. cepacia complex (BCC_SPECIES)
+                    AMRFinderPlus's Burkholderia_cepacia taxgroup, not only
+                    B. cepacia itself.
+                tests/test_species.py pins each of these.
+
+Patches 3 and 4 belong upstream: they are needed by any Hydra that has more
+than Kleborate's sketch, and on Linux too.
+
+The mutation detail that v0.3.0 carried as a local patch is upstream code on
+the vendored branch (pull request #2), with the identical engine, and
 tools/compare_upstream.py still checks the workbooks against it.
 
 What the vendored branch adds beyond main (pull request #3):

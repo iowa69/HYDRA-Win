@@ -182,6 +182,22 @@ protein search keeps its own 90% identity / 90% coverage, and point mutations an
 MLST/typing keep their own rules. Values go from 0 to 100, with decimals allowed
 (`92.5` or `92,5`).
 
+#### Confident calls
+
+The settings decide what is *found*. What is *counted* is fixed, whatever they are
+set to: the Summary sheet, the window and `Cumulative_results.xlsx` count and list an
+AMR gene only when it is a **confident call** — at least one database at that locus
+matches it at **≥ 90% identity over ≥ 90% of the reference gene**, complete (not cut by
+a contig end, no internal stop codon). 90% identity is AMRFinderPlus's own minimum for
+a BLAST-based hit where it has no curated cut-off, and below 90% coverage AMRFinderPlus
+and upstream Hydra both call a hit PARTIAL.
+
+Every other AMR hit is listed under **AMR genes to check (below the confident-call
+bar)**, with the reason (`blaTEM-1 (partial: 72.4% of the reference gene)`), and every
+hit stays on its sheet with a **Confident call** column. A drug class is listed when a
+confident gene *or* an established point mutation is behind it, so `gyrA` S83I puts
+quinolones on the Summary with no *qnr* gene present.
+
 Every workbook's `Summary` sheet records the settings used in a *Settings used*
 section, together with the equivalent upstream flags. `Cumulative_results.xlsx`
 records them under its summary table. Any result can be traced to its thresholds.
@@ -212,9 +228,10 @@ failed. Every run also writes `hydra-win.log` into the results folder.
 
 ### When a download fails
 
-Six things are downloaded on first launch: PubMLST, CARD, the Ridom *spa* database,
-hicap's *cap* database, ShigEiFinder and the *N. meningitidis* typing data. For
-PubMLST and CARD, HYDRA-Win uses the Windows network settings, as your browser does:
+Four things are downloaded on first launch: CARD, the Ridom *spa* database, hicap's
+*cap* database and ShigEiFinder. Everything else, including PubMLST and the
+*N. meningitidis* typing data, is in the zip. For CARD, HYDRA-Win uses the Windows
+network settings, as your browser does:
 the system proxy (including automatic proxy configuration scripts), the Windows
 certificate store (so a hospital network that inspects HTTPS works), and, if Python's
 own connection is refused, Windows' own downloader with your logon credentials (for
@@ -255,8 +272,8 @@ For each genome, `<results>\<genome>\<genome>.xlsx` contains these sheets:
 
 | Sheet | Contents |
 | --- | --- |
-| `Summary` | Any analysis not performed because a database is missing (first, highlighted), species, MLST scheme/ST/profile, scores (resistance 0-3, ESBL, carbapenemase, colistin, virulence), counts per category, detected genes per category, each point mutation and disruption in one sentence with its resistance, lineage/serotype typing, assembly QC, the settings used, and database versions and thresholds |
-| `AMR_genes` | Every acquired AMR hit and every stress hit (biocide/metal/heat) |
+| `Summary` | Any analysis not performed because a database is missing (first, highlighted), species, MLST scheme/ST/profile, scores (resistance 0-3, ESBL, carbapenemase, colistin, virulence), counts per category (AMR genes: confident calls only), detected genes per category, the AMR genes to check with the reason, each point mutation and disruption in one sentence with its resistance, lineage/serotype typing, assembly QC, the settings used, and database versions and thresholds |
+| `AMR_genes` | Every acquired AMR hit and every stress hit (biocide/metal/heat), with a *Confident call* column (`confident`, or `check:` and the reason) |
 | `Point_mutations` | Resistance point mutations and gene disruptions: what changed, where and what it means first, then the raw hit columns (see below) |
 | `Virulence` | Virulence factor hits |
 | `Plasmids` | Plasmid replicon hits |
@@ -462,9 +479,17 @@ Two pieces are added for Windows:
 
 * **Species identification.** Upstream uses Mash, which has no Windows build.
   HYDRA-Win includes a pure-Python re-implementation of `mash dist` and runs it against
-  Kleborate's species sketches. It gives the same shared-hash counts as Mash 2.3 on the
-  test genomes. Upstream's species rules are then applied unchanged. Without it,
-  upstream's MLST-only fallback names some *Klebsiella* genomes as *E. coli*.
+  Kleborate's sketch (the Enterobacterales) and HYDRA-Win's own **clinical sketch of 60
+  more species**: 498 NCBI RefSeq genomes of the staphylococci, enterococci,
+  streptococci, *Listeria*, *C. difficile*, the non-fermenters (*Pseudomonas*,
+  *Acinetobacter*, *Stenotrophomonas*, *Burkholderia*), *Haemophilus*, *Neisseria*,
+  *Campylobacter*, *Vibrio* and others (`tools/clinical_species.tsv` lists them, with
+  why each is there and why the *M. tuberculosis* complex, the *B. cereus* group,
+  *Brucella* and *B. mallei* are not). It gives the same distances as Mash 2.3. Without
+  a sketch, upstream's MLST-only fallback names some *Klebsiella* as *E. coli*, an
+  *S. argenteus* as *S. aureus* (they share a scheme), an *A. pittii* as
+  *A. baumannii*, and a gonococcus only as "*Neisseria* sp.", with no mutation
+  catalogue at all.
 * **BLAST+ path handling.** BLAST+ on Windows can't cope with spaces or non-ASCII
   characters in paths. HYDRA-Win runs it from an ASCII, space-free folder (the 8.3
   short name, or `%LOCALAPPDATA%\Hydra-win`) and passes it relative paths, so the app
@@ -480,17 +505,26 @@ Two pieces are added for Windows:
   reads.
 * **`vfdb_full` isn't used.** Upstream can't download it automatically, it overlaps
   with the core VFDB set, and it's by far the slowest search.
-* The species sketches cover Enterobacterales. Other genera are named from their MLST
-  scheme, as in upstream — which means that **until the first-launch download has run,
-  only an Enterobacterales is identified to species**, and organism typing, which is
-  selected from the species call or the MLST scheme, is not applied to anything else.
-  After the download, every organism in the table above is identified and typed. The
-  window and the workbook say "no module for this species" rather than leaving it
-  blank.
-* PubMLST and CARD need an internet connection on the first launch, or a copy
-  imported from another PC. So do the *spa* type, the *H. influenzae* capsule, the
-  *Shigella*/EIEC cluster call and the whole *N. meningitidis* module (see
-  [Organism typing data](#organism-typing-data)). Everything else types offline.
+* **How well species are named, measured.** The clinical sketch was tested on 292
+  draft assemblies it had never seen (contig or scaffold level, the kind you bring),
+  five per species where NCBI has them: **291 were named correctly and none wrongly** (284 of 285 leaving out 7 that are identical to a sketch genome at its resolution);
+  one *S. oralis* was too far from every sketch genome and was named from its MLST
+  scheme instead, as a genome of a species outside both sketches is. Every result is in
+  [docs/species_sketch_validation.md](docs/species_sketch_validation.md). The closest
+  neighbours are *N. gonorrhoeae* / *N. meningitidis* / *N. lactamica* and
+  *S. pneumoniae* / *S. pseudopneumoniae*; their genomes sat at least 0.02 closer to
+  their own species than to the neighbour. Coverage is thinnest where NCBI holds few
+  genomes that pass its own taxonomy check: *H. parainfluenzae* has one sketch genome,
+  so many of its genomes will fall back to MLST rather than be named.
+* A species named by the sketch decides the AMRFinderPlus mutation catalogue and the
+  organism typing module, and a neighbour's scheme no longer overrides it: a gonococcus
+  gets the gonococcal catalogue (*penA*, *mtrR*, *gyrA* S91F) and not the meningococcal
+  typing module. The changes this needed in the vendored engine are listed in
+  `src/hydra_amr/VENDORED.txt` (patches 3 and 4).
+* CARD needs an internet connection on the first launch, or a copy imported from
+  another PC. So do the *spa* type, the *H. influenzae* capsule and the
+  *Shigella*/EIEC cluster call (see [Organism typing data](#organism-typing-data)).
+  Everything else, MLST and the whole *N. meningitidis* module included, works offline.
 * Organism-specific typing covers the eight organisms in
   [Organism-specific typing](#organism-specific-typing). Another species gets the
   species call, MLST, the lineage and element schemes and the full gene, mutation,
@@ -512,6 +546,7 @@ on your PC. The organism typing data follows the same rule and is listed in
 | PlasmidFinder | in the zip | Apache-2.0 | Carattoli et al. 2014, Antimicrob Agents Chemother 58:3895 |
 | SCCmecFinder | in the zip | Apache-2.0 | Kaya et al. 2018, mSphere 3:e00612-17 |
 | Kleborate typing loci and species sketches (v3.2.4) | in the zip | GPL-3.0 | Lam et al. 2021, Nat Commun 12:4188; Ondov et al. 2016, Genome Biol 17:132 |
+| HYDRA-Win clinical species sketch (498 genomes, 60 species) | in the zip, next to Kleborate's in `db\sketch\species` | Public domain (NCBI RefSeq); every genome and its NCBI checks in `clinical_species_sources.tsv` | O'Leary et al. 2016, Nucleic Acids Res 44:D733; Ondov et al. 2016, Genome Biol 17:132 |
 | VFDB (core) | in the zip, from VFDB (`VFDB_setA_nt.fas.gz`) | The source states no licence | Liu et al. 2022, Nucleic Acids Res 50:D912 |
 | ARG-ANNOT | in the zip, from abricate's repository (pinned commit) | The source states no licence | Gupta et al. 2014, Antimicrob Agents Chemother 58:212 |
 | MEGARes | in the zip, from abricate's repository (pinned commit) | The source states no licence | Bonin et al. 2023, Nucleic Acids Res 51:D744 |

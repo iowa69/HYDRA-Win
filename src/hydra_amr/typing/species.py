@@ -22,6 +22,26 @@ from ..utils import LOG, have, run
 MASH_SPECIES_DISTANCE = 0.05
 MASH_STRONG_DISTANCE = 0.02
 
+#: HYDRA-WIN PATCH 4 (see VENDORED.txt): the validly named members of the
+#: Burkholderia cepacia complex.
+BCC_SPECIES = frozenset({
+    "ambifaria", "anthina", "arboris", "cenocepacia", "cepacia", "contaminans", "diffusa",
+    "dolosa", "lata", "latens", "metallica", "multivorans", "pseudomultivorans",
+    "puraquae", "pyrrocinia", "seminalis", "stabilis", "stagnalis", "territorii",
+    "ubonensis", "vietnamiensis"})
+
+
+def genus_level(call: SpeciesCall) -> bool:
+    """A call that names a genus or a group within it, not one species.
+
+    HYDRA-WIN PATCH 4: the "neisseria" scheme gives "Neisseria sp.", the
+    campylobacter scheme "Campylobacter jejuni/coli", bcc "Burkholderia
+    cepacia complex".
+    """
+    epithet = (call.species or "").strip().lower()
+    return bool(call.genus) and (not epithet or epithet == "sp." or "/" in epithet
+                                 or "complex" in epithet)
+
 
 @dataclass(frozen=True)
 class SchemeOrganism:
@@ -174,6 +194,19 @@ class SpeciesIdentifier:
                 and sketch.genus.lower() != call.genus.lower()
                 and sketch.distance is not None
                 and sketch.distance < MASH_SPECIES_DISTANCE)
+            # HYDRA-WIN PATCH 4: a scheme that names only a genus (or a group in
+            # it) is refined by a sketch inside that genus at the species
+            # distance. There is nothing to override: the scheme never said
+            # which species, and the sketch is the only evidence that does.
+            refines = (disagrees and genus_level(call) and not genus_level(sketch)
+                       and (sketch.genus or "").lower() == (call.genus or "").lower()
+                       and sketch.distance is not None
+                       and sketch.distance < MASH_SPECIES_DISTANCE)
+            if refines:
+                sketch.evidence += (f"; MLST scheme {mlst.scheme} names the genus only "
+                                    f"({call.name}, {mlst.loci_found}/{mlst.loci_total} "
+                                    "exact loci)")
+                return sketch
             if call.confidence in ("none", "weak") or (confident and disagrees) or genus_conflict:
                 if call.confidence != "none":
                     sketch.evidence += f"; MLST scheme {mlst.scheme} suggested {call.name}"
@@ -263,6 +296,15 @@ class SpeciesIdentifier:
         for entry in self.scheme_table.values():
             if entry.organism and entry.name.lower() == name.lower():
                 return entry.organism
+        # HYDRA-WIN PATCH 4 (see VENDORED.txt): species whose PubMLST scheme is
+        # genus-level, so the scheme table cannot carry their taxgroup. Only a
+        # sketch names them, and without this the catalogue AMRFinderPlus
+        # curates for them (penA, mtrR, gyrA S91F for the gonococcus) is never
+        # applied.
+        by_name = {"neisseria gonorrhoeae": "Neisseria_gonorrhoeae",
+                   "neisseria meningitidis": "Neisseria_meningitidis"}
+        if name and " ".join(name.lower().split()[:2]) in by_name:
+            return by_name[" ".join(name.lower().split()[:2])]
         genus = name.split()[0] if name else ""
         # Taxgroups that cover a whole genus, plus the complexes whose scheme
         # entry is not a plain binomial and so never matches by name.
@@ -273,7 +315,12 @@ class SpeciesIdentifier:
         }
         if genus == "Burkholderia":
             species = name.split()[1].lower() if len(name.split()) > 1 else ""
-            return {"cepacia": "Burkholderia_cepacia", "mallei": "Burkholderia_mallei",
+            # HYDRA-WIN PATCH 4: AMRFinderPlus curates the B. cepacia complex as
+            # one taxgroup (gpipe "Burkholderia_cepacia_complex"), so every
+            # member gets it, not only B. cepacia itself.
+            if species in BCC_SPECIES:
+                return "Burkholderia_cepacia"
+            return {"mallei": "Burkholderia_mallei",
                     "pseudomallei": "Burkholderia_pseudomallei"}.get(species)
         if genus == "Klebsiella":
             species = name.split()[1].lower() if len(name.split()) > 1 else ""

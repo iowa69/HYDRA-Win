@@ -24,6 +24,8 @@ from hydra_amr.records import Hit, SampleResult, TypingResult
 from hydra_amr.typing.organisms import _hinf_nmen_common as capsule_wording
 from hydra_amr.typing.organisms import registry as organisms
 
+from . import calls as confidence
+
 # ---------------------------------------------------------------- categories
 AMR = "AMR"
 STRESS = "Stress"
@@ -177,13 +179,18 @@ HIT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("Reference span", "coverage"),
     ("Gaps", "gaps"),
     ("Primary call", "primary"),
+    ("Confident call", "_confident"),
     ("Note", "note"),
 )
 
 
-def hit_values(hit: Hit) -> list:
+def hit_values(hit: Hit, confident: str = "") -> list:
+    """The raw columns of one hit; *confident* is its Confident call cell."""
     out = []
     for _title, attr in HIT_COLUMNS:
+        if attr == "_confident":
+            out.append(confident)
+            continue
         value = getattr(hit, attr)
         if attr in ("identity_pct", "coverage_pct"):
             value = round(float(value), 2)
@@ -359,6 +366,7 @@ def write_hit_table(ws: Worksheet, hits: Sequence[Hit], *, leading: Sequence[tup
               + mutation_titles + [t for t, _ in raw])
     _write_header(ws, 1, titles)
     identity_col = titles.index("Identity (%)") + 1
+    labels = confident_labels([item[0] if isinstance(item, tuple) else item for item in hits])
     row = 1
     for item in hits:
         hit, lead_values = (item if isinstance(item, tuple) else (item, ()))
@@ -366,7 +374,8 @@ def write_hit_table(ws: Worksheet, hits: Sequence[Hit], *, leading: Sequence[tup
         values = (list(lead_values) + ([category(hit)] if with_category else [])
                   + ([_clean(mutation_summary(hit))] if with_mutation_summary else [])
                   + (mutation_values(hit) if mutations else [])
-                  + [v for (t, a), v in zip(HIT_COLUMNS, hit_values(hit))
+                  + [v for (t, a), v in zip(HIT_COLUMNS,
+                                            hit_values(hit, labels.get(id(hit), "")))
                      if not (mutations and a in _MUTATION_RAW_SKIP)])
         for col, value in enumerate(values, start=1):
             cell = ws.cell(row=row, column=col, value=value)
@@ -446,11 +455,62 @@ def _yes_no(value):
     return value
 
 
+#: The Summary's name for AMR genes found but below the confident-call bar.
+TO_CHECK_TITLE = "AMR genes to check (below the confident-call bar)"
+
+
+def amr_verdicts(hits: Sequence[Hit]) -> list[tuple["Locus", confidence.Verdict]]:
+    """Every primary AMR gene locus among *hits* (one sample), judged once."""
+    return [(lc, confidence.judge(lc.calls)) for lc in group_loci(list(hits))
+            if lc.primary.primary and lc.category == AMR]
+
+
+def confident_labels(hits: Sequence[Hit]) -> dict[int, str]:
+    """id(hit) -> its Confident call cell. Samples are judged separately."""
+    by_sample: dict[str, list[Hit]] = {}
+    for hit in hits:
+        by_sample.setdefault(hit.sample, []).append(hit)
+    out: dict[int, str] = {}
+    for sample_hits in by_sample.values():
+        for locus, verdict in amr_verdicts(sample_hits):
+            if verdict.confident:
+                text = "confident" + (f" ({verdict.evidence})" if verdict.evidence else "")
+            else:
+                text = f"check: {verdict.reason}"
+            out[id(locus.primary)] = text
+        for hit in sample_hits:
+            if not hit.primary and category(hit) == AMR:
+                out[id(hit)] = "-"   # judged with the primary call on its locus
+    return out
+
+
+def _confident_amr(result: SampleResult) -> set[int]:
+    return {id(lc.primary) for lc, v in amr_verdicts(result.hits) if v.confident}
+
+
 def primary_genes(result: SampleResult, cat: str) -> list[str]:
-    """Distinct gene names of the primary calls in one category, in order."""
+    """Distinct gene names of the primary calls in one category, in order.
+
+    AMR genes are the confident calls only (see :mod:`hydra_win.calls`); the
+    others are in :func:`amr_to_check`.
+    """
     seen: "OrderedDict[str, None]" = OrderedDict()
-    for hit in sort_hits(h for h in result.hits if h.primary and category(h) == cat):
+    hits = sort_hits(h for h in result.hits if h.primary and category(h) == cat)
+    if cat == AMR:
+        keep = _confident_amr(result)
+        hits = [h for h in hits if id(h) in keep]
+    for hit in hits:
         seen.setdefault(label(hit), None)
+    return list(seen)
+
+
+def amr_to_check(result: SampleResult) -> list[str]:
+    """'blaTEM-1 (partial: 72.4% of the reference gene)' for each AMR gene below the bar."""
+    reasons = {id(lc.primary): v.reason for lc, v in amr_verdicts(result.hits)
+               if not v.confident}
+    seen: "OrderedDict[str, None]" = OrderedDict()
+    for hit in sort_hits(h for h in result.hits if id(h) in reasons):
+        seen.setdefault(f"{label(hit)} ({reasons[id(hit)]})", None)
     return list(seen)
 
 
@@ -459,9 +519,15 @@ def category_counts(result: SampleResult) -> dict[str, int]:
 
 
 def amr_classes(result: SampleResult) -> list[str]:
-    classes = sorted({h.drug_class for h in result.hits
-                      if h.primary and category(h) == AMR and h.drug_class})
-    return classes
+    """Drug classes with a confident gene or an established mutation behind them.
+
+    A mutation counts on its own (gyrA S83I is quinolone resistance with no
+    qnr gene present); one in a gene cut by a contig end does not.
+    """
+    keep = _confident_amr(result)
+    return sorted({h.drug_class for h in result.hits if h.primary and h.drug_class and (
+        (category(h) == AMR and id(h) in keep)
+        or (category(h) == MUTATION and not is_contig_end(h)))})
 
 
 def typing_label(scheme: str) -> str:
@@ -525,6 +591,8 @@ class RunInfo:
 
 NOT_TYPED = "not typed: PubMLST schemes not installed (not a negative result)"
 MISSING_FILL = "F8CBAD"
+#: A hit found but below the confident-call bar: amber, "look at this", not a negative.
+CHECK_FILL = "FFE699"
 
 
 def mlst_text(result: SampleResult, missing: dict | None = None) -> str:
@@ -590,9 +658,14 @@ def write_genome_summary(ws: Worksheet, result: SampleResult, info: RunInfo) -> 
 
     row += 1
     row = _section(ws, row, "Counts (distinct genes, primary calls)")
+    row = _kv(ws, row, "Confident call", confidence.RULE_TEXT)
     counts = category_counts(result)
+    to_check = amr_to_check(result)
     for cat, title in COUNT_LABELS.items():
         row = _kv(ws, row, title, counts[cat], colour=CATEGORY_COLOURS[cat])
+        if cat == AMR:
+            row = _kv(ws, row, TO_CHECK_TITLE, len(to_check),
+                      colour=CHECK_FILL if to_check else None)
     row = _kv(ws, row, "AMR drug classes", len(amr_classes(result)))
     row = _kv(ws, row, "All hits (incl. redundant database calls)", len(result.hits))
 
@@ -602,7 +675,12 @@ def write_genome_summary(ws: Worksheet, result: SampleResult, info: RunInfo) -> 
         genes = mutation_lines(result) if cat == MUTATION else primary_genes(result, cat)
         row = _kv(ws, row, f"{COUNT_LABELS[cat]} (names)",
                   ("; " if cat == MUTATION else ", ").join(genes) if genes else "none")
+        if cat == AMR:
+            row = _kv(ws, row, f"{TO_CHECK_TITLE} (names)", "; ".join(to_check) or "none",
+                      colour=CHECK_FILL if to_check else None)
     row = _kv(ws, row, "AMR drug classes (names)", ", ".join(amr_classes(result)) or "none")
+    row = _kv(ws, row, "AMR drug classes: basis",
+              "confident AMR genes and established point mutations / disruptions")
 
     row += 1
     row = _section(ws, row, "Point mutations and gene disruptions: what changed")
@@ -989,7 +1067,8 @@ def cumulative_summary_rows(results: Sequence[SampleResult],
               + [_scheme_column(results, s) for s in typing_schemes]
               + list(SCORE_LABELS.values())
               + [COUNT_LABELS[c] + " (n)" for c in COUNT_LABELS] + ["AMR drug classes (n)"]
-              + ["AMR genes", "Point mutations / disruptions", "Virulence genes",
+              + ["AMR genes", TO_CHECK_TITLE, "Point mutations / disruptions",
+                 "Virulence genes",
                  "Plasmid replicons", "Contigs", "Total length (bp)", "N50 (bp)", "GC (%)",
                  "Warnings"])
     rows = []
@@ -1006,6 +1085,7 @@ def cumulative_summary_rows(results: Sequence[SampleResult],
         row += [_yes_no(result.scores.get(key, "")) for key in SCORE_LABELS]
         row += [counts[c] for c in COUNT_LABELS] + [len(amr_classes(result))]
         row += [", ".join(primary_genes(result, AMR) + primary_genes(result, STRESS)),
+                "; ".join(amr_to_check(result)),
                 "; ".join(mutation_lines(result)),
                 ", ".join(primary_genes(result, VIRULENCE)),
                 ", ".join(primary_genes(result, PLASMID))]

@@ -49,6 +49,8 @@ from hydra_amr.db.registry import DATABASES, spec_for
 from hydra_amr.typing.organisms import registry as organisms
 from hydra_amr.utils import HydraError
 
+from . import REPO_URL
+
 LOG = logging.getLogger("hydra")
 
 #: abricate repository commit the abricate-only databases are taken from.
@@ -93,7 +95,8 @@ ROUTES: tuple[Route, ...] = (
     Route("sccmec", "bundled", "Apache-2.0 (CGE SCCmecFinder)", "redistribution permitted"),
     Route("lineage", "bundled", "GPL-3.0 (Kleborate modules)",
           "redistribution permitted with the licence text and source location"),
-    Route("species", "bundled", "GPL-3.0 (Kleborate species Mash sketches)",
+    Route("species", "bundled", "GPL-3.0 (Kleborate species Mash sketches); HYDRA-Win's "
+                                "clinical sketch: public domain (NCBI RefSeq)",
           "redistribution permitted with the licence text and source location"),
     Route("vfdb", "bundled", "VFDB core set: no licence stated by the source", NO_LICENCE),
     Route("argannot", "bundled", "ARG-ANNOT: no licence stated by the source", NO_LICENCE),
@@ -135,7 +138,7 @@ IMPACT = {
 #: Display names.
 TITLES = {"protein": "AMRFinderPlus proteins, point mutations", "ncbi": "AMRFinderPlus genes (NCBI)",
           "resfinder": "ResFinder", "plasmidfinder": "PlasmidFinder", "sccmec": "SCCmecFinder",
-          "lineage": "Kleborate lineage modules", "species": "Kleborate species sketches",
+          "lineage": "Kleborate lineage modules", "species": "Species sketches (Kleborate, clinical)",
           "vfdb": "VFDB (core)", "argannot": "ARG-ANNOT", "megares": "MEGARes",
           "ecoli_vf": "E. coli VF", "ecoh": "EcOH", "pubmlst": "PubMLST (MLST schemes)",
           "card": "CARD"}
@@ -160,6 +163,74 @@ def source_url(name: str) -> str:
     if name in ABRICATE_ONLY:
         return ABRICATE_URL.format(name=name)
     return spec_for(name).url
+
+
+#: HYDRA-Win's own Mash sketch of the clinical species Kleborate's sketch does
+#: not cover (tools/clinical_species.tsv; built by tools/build_species_sketch.py
+#: from NCBI RefSeq, public domain). It ships with the program and is copied
+#: next to Kleborate's, where upstream's species identifier reads every .msh.
+DATA_DIR = Path(__file__).resolve().parent / "data"
+CLINICAL_SKETCH = DATA_DIR / "clinical_species.msh"
+CLINICAL_SOURCES = DATA_DIR / "clinical_species_sources.tsv"
+
+
+def install_clinical_sketch(store: DatabaseStore) -> Path | None:
+    """Put the clinical sketch in the species folder. Returns its path, or None.
+
+    Idempotent, and a copy left by an older release is replaced. The species
+    entry in the manifest is not touched, so Kleborate's version and date stay
+    as they were recorded.
+    """
+    entry = store.installed().get("species")
+    if not entry or not store.is_installed("species") or not CLINICAL_SKETCH.is_file():
+        return None
+    folder = store.root / entry["path"]
+    for source in (CLINICAL_SOURCES, CLINICAL_SKETCH):  # the sketch last: it is what is read
+        if not source.is_file():
+            continue
+        target = folder / source.name
+        data = source.read_bytes()
+        if not target.is_file() or target.read_bytes() != data:
+            partial = target.with_name(target.name + ".part")
+            partial.write_bytes(data)
+            partial.replace(target)
+            LOG.info("installed %s in %s", source.name, folder)
+    return folder / CLINICAL_SKETCH.name
+
+
+def clinical_sketch_summary() -> dict:
+    """{'genomes', 'species', 'retrieved'} of the packaged sketch, from its table."""
+    if not CLINICAL_SOURCES.is_file():
+        return {}
+    genomes, species, retrieved = 0, set(), ""
+    for line in CLINICAL_SOURCES.read_text(encoding="utf-8").splitlines():
+        if line.startswith("#"):
+            found = re.search(r"retrieved (\d{4}-\d{2}-\d{2})", line)
+            retrieved = retrieved or (found.group(1) if found else "")
+            continue
+        fields = line.split("\t")
+        if len(fields) > 1 and fields[1] == "sketch":
+            genomes += 1
+            species.add(fields[0])
+    return {"genomes": genomes, "species": len(species), "retrieved": retrieved}
+
+
+def version_text(name: str, entry: dict) -> str:
+    """A database's version for a reader, never upstream's placeholder "unknown".
+
+    Where the source states no version, what identifies the copy is where it
+    came from and when: the pinned abricate commit and the retrieval date.
+    """
+    version = (entry.get("version") or "").strip()
+    retrieved = (entry.get("installed") or "")[:10]
+    if version and version != "unknown":
+        return f"{version}, retrieved {retrieved}" if retrieved else version
+    parts = ["not stated by the source"]
+    if name in ABRICATE_ONLY:
+        parts.append(f"abricate commit {ABRICATE_COMMIT[:7]}")
+    if retrieved:
+        parts.append(f"retrieved {retrieved}")
+    return "; ".join(parts)
 
 
 def missing(store: DatabaseStore, names: tuple[str, ...] = ALL) -> list[str]:
@@ -408,6 +479,9 @@ def build_bundle(db_root: Path, names: tuple[str, ...] = BUNDLED) -> Path:
     for name in ("lineage", "species"):
         if store.is_installed(name):
             store.record(name, source=kleborate, version=tag_name)
+    if install_clinical_sketch(store) is None:
+        raise HydraError("could not bundle the clinical species sketch: the species database "
+                         f"is not installed or {CLINICAL_SKETCH} is missing")
     sizes = build_organism_bundle(db_root)
     LOG.info("organism typing data bundled: %.2f MB in total",
              sum(sizes.values()) / 1e6)
@@ -460,6 +534,18 @@ def write_notice(db_root: Path, kleborate_source: str = "") -> None:
                   "modules (GPL-3.0,",
                   "licences/Kleborate-GPL-3.0.txt). Corresponding source:",
                   f"  {kleborate_source}", ""]
+    clinical = clinical_sketch_summary()
+    if clinical:
+        lines += ["The 'species' folder also holds clinical_species.msh, HYDRA-Win's Mash",
+                  f"sketch of {clinical['genomes']} genomes of {clinical['species']} species "
+                  "outside the",
+                  "Enterobacterales (which Kleborate's sketch covers), so that they are",
+                  "identified by whole-genome distance and not by their MLST scheme alone.",
+                  f"Built from NCBI RefSeq (public domain) on {clinical['retrieved']} by",
+                  "tools/build_species_sketch.py: every genome passed NCBI's ANI taxonomy",
+                  "check. Accessions and checks: clinical_species_sources.tsv, next to it.",
+                  "Validation on held-out genomes: docs/species_sketch_validation.md in",
+                  f"{REPO_URL}.", ""]
     lines += ["ResFinder, PlasmidFinder and SCCmecFinder data: Apache-2.0,",
               "licences/Apache-2.0.txt. Sources are listed above.", ""]
     lines += organism_notice_lines(db_root)

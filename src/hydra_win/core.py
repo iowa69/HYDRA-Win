@@ -24,8 +24,8 @@ from hydra_amr.pipeline import Pipeline, RunOptions
 from hydra_amr.records import SampleResult
 from hydra_amr.utils import HydraError, cpu_count
 
-from . import (APP_NAME, UPSTREAM_COMMIT, UPSTREAM_URL, __version__, databases, excel, mashlite,
-               netfetch, runtime, winsafe)
+from . import (APP_NAME, UPSTREAM_COMMIT, UPSTREAM_URL, __version__, calls, databases, excel,
+               mashlite, netfetch, runtime, winsafe)
 
 LOG = logging.getLogger("hydra")
 
@@ -37,10 +37,13 @@ READ_COMPRESSED = (".gz", ".bz2", ".xz", ".zst")
 #: progress(fraction or None for "busy", message)
 ProgressFn = Callable[[float | None, str], None]
 
-SPECIES_NOTE = ("Species: Mash distance to the Kleborate species sketches (as upstream Hydra), "
+SPECIES_NOTE = ("Species: Mash distance to Kleborate's Enterobacterales sketch (as upstream "
+                f"Hydra) and to {APP_NAME}'s clinical sketch of "
+                f"{databases.clinical_sketch_summary().get('species', 0)} other species "
+                "(NCBI RefSeq), "
                 f"computed by {APP_NAME}'s built-in re-implementation of 'mash dist' because "
-                "Mash has no Windows build; the sketches cover Enterobacterales, other genera "
-                "are named from their MLST scheme.")
+                "Mash has no Windows build. A genome within neither (distance 0.05 or more) is "
+                "named from its MLST scheme.")
 READS_NOTE = (f"{APP_NAME} analyses assemblies (FASTA) only: reads (FASTQ) and "
               "heteroresistance analysis are not part of the Windows version.")
 
@@ -291,7 +294,11 @@ def explain_automatic() -> str:
             "replaces these for every nucleotide database, exactly like upstream's "
             "--min-identity / --min-coverage. The AMRFinderPlus protein search "
             f"({t.protein_min_identity:g}% / {t.protein_min_coverage:g}%), point mutations "
-            "and MLST/typing keep their own rules. Threads change speed, never results.")
+            "and MLST/typing keep their own rules. Threads change speed, never results. "
+            f"Whatever these are set to, the Summary counts an AMR gene only as a confident "
+            f"call: >= {calls.CONFIDENT_IDENTITY:g}% identity over >= "
+            f"{calls.CONFIDENT_COVERAGE:g}% of the gene, complete. That bar is fixed, not a "
+            "setting; every other hit is listed as 'to check' with the reason.")
 
 
 @dataclass
@@ -425,6 +432,12 @@ def ensure_databases(progress: ProgressFn | None = None, offline: bool = False) 
     netfetch.install()
     rt = runtime.prepare()
     store = DatabaseStore(rt.db_root)
+    try:
+        databases.install_clinical_sketch(store)
+    except OSError as exc:
+        # Without it species outside the Enterobacterales are named from
+        # their MLST scheme, as before: worth a warning, never a failed run.
+        LOG.warning("could not install the clinical species sketch: %s", exc)
     todo = databases.missing(store)
     if todo:
         reused = databases.adopt(store, todo, [r for r in runtime.legacy_db_roots()
@@ -459,7 +472,7 @@ def ensure_databases(progress: ProgressFn | None = None, offline: bool = False) 
 def _run_info(store: DatabaseStore, used: Sequence[str], missing: Sequence[str],
               config: Config, settings: Settings) -> excel.RunInfo:
     installed = store.installed()
-    db_text = ", ".join(f"{name} ({installed.get(name, {}).get('version') or 'n/a'})"
+    db_text = ", ".join(f"{name} ({databases.version_text(name, installed.get(name, {}))})"
                         for name in list(used) + [n for n in ("pubmlst", "lineage", "species", "sccmec")
                                                   if store.is_installed(n)])
     t = config.thresholds
@@ -476,7 +489,8 @@ def _run_info(store: DatabaseStore, used: Sequence[str], missing: Sequence[str],
     thresholds = (f"{nucleotide}; protein >= {t.protein_min_identity:g}% / "
                   f"{t.protein_min_coverage:g}%; point mutations >= "
                   f"{t.mutation_min_identity:g}% / {t.mutation_min_coverage:g}%; "
-                  "AMRFinderPlus --plus elements on")
+                  "AMRFinderPlus --plus elements on. Confident call (counted on the "
+                  f"Summary): {calls.RULE_TEXT}")
     return excel.RunInfo(
         app_version=__version__,
         upstream=f"{UPSTREAM_URL} @ {UPSTREAM_COMMIT[:7]}",

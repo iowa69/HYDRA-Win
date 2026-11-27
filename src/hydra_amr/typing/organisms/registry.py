@@ -483,6 +483,22 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "").strip().lower())
 
 
+#: Words in a species field that make it a placeholder, not a species name:
+#: Kleborate's sketch labels such as "Escherichia cryptic-clade-1" or
+#: "Proteus genomosp-4", and the scheme table's "jejuni/coli" or
+#: "cepacia complex".
+_NOT_A_SPECIES = ("sp.", "clade", "genomosp", "unknown", "complex", "/")
+
+
+def names_a_species(species: SpeciesCall | None) -> bool:
+    """Whether a species call names one species (not a genus, complex or clade).
+
+    HYDRA-WIN PATCH 3 (see VENDORED.txt).
+    """
+    epithet = _norm(getattr(species, "species", "")) if species else ""
+    return bool(epithet) and not any(word in epithet for word in _NOT_A_SPECIES)
+
+
 def select(species: SpeciesCall | None = None, mlst: MlstCall | None = None,
            *, only: Sequence[str] | None = None) -> list[OrganismModule]:
     """The modules that should be run for one sample, in key order.
@@ -515,7 +531,13 @@ def select(species: SpeciesCall | None = None, mlst: MlstCall | None = None,
                 chosen[key] = entry
                 break
 
-    if not chosen and mlst is not None and mlst.scheme and mlst.scheme != "-":
+    # HYDRA-WIN PATCH 3 (see VENDORED.txt): the scheme chooses a module only
+    # when the species call does not name a species. A scheme shared by
+    # neighbours ("neisseria" for N. meningitidis and N. gonorrhoeae,
+    # "saureus" for S. aureus and S. argenteus) would otherwise give a named
+    # gonococcus the meningococcal module.
+    if not chosen and not names_a_species(species) and mlst is not None and mlst.scheme \
+            and mlst.scheme != "-":
         scheme = _norm(mlst.scheme)
         for key, entry in available.items():
             if scheme in {_norm(s) for s in entry.mlst_schemes}:

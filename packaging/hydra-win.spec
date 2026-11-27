@@ -13,6 +13,9 @@ datas = [
     (str(SRC / "hydra_amr" / "LICENSE"), "hydra_amr"),
     (str(SRC / "hydra_amr" / "VENDORED.txt"), "hydra_amr"),
     (str(ASSETS), "hydra_win/assets"),  # logo and window icon
+    # The clinical species Mash sketch and the table of genomes behind it;
+    # databases.install_clinical_sketch() copies the sketch into db\sketch\species.
+    (str(SRC / "hydra_win" / "data"), "hydra_win/data"),
 ]
 datas += collect_data_files("tkinterdnd2")
 binaries = collect_dynamic_libs("tkinterdnd2")

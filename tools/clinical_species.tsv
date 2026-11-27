@@ -1,0 +1,85 @@
+# Species in HYDRA-Win's clinical Mash sketch (db/sketch/species/clinical_species.msh).
+#
+# Kleborate's sketch, which upstream Hydra uses, covers the Enterobacterales only.
+# Without a sketch, every other genome is named from its MLST scheme, and that is
+# not enough for the species below: several share one scheme with their
+# neighbours (N. meningitidis, N. gonorrhoeae and N. lactamica are all typed by
+# PubMLST's "neisseria" scheme; S. pneumoniae's scheme types S. pseudopneumoniae;
+# the A. baumannii schemes type A. pittii and A. nosocomialis), and a species
+# call decides which AMRFinderPlus mutation catalogue and which organism typing
+# module a genome gets.
+#
+# Built by tools/build_species_sketch.py from NCBI RefSeq (public domain). Only
+# genomes that pass NCBI's ANI taxonomy check are used.
+#
+# Deliberately NOT included, because a Mash distance cannot separate them from
+# a neighbour and a confident wrong name is worse than none:
+#   Mycobacterium tuberculosis complex  (M. bovis, intrinsically pyrazinamide-
+#                                        resistant, is within d < 0.01 of M. tuberculosis)
+#   Bacillus cereus group                (B. anthracis sits inside B. cereus s.l.)
+#   Brucella                             (all species form one genomospecies)
+#   Burkholderia mallei                  (a clonal lineage inside B. pseudomallei)
+#   Shigella                             (inside E. coli; ShigEiFinder separates them)
+#
+# Columns: species (NCBI name), group, why it is here.
+species	group	why
+Staphylococcus aureus	Gram-positive	MRSA, MSSA; the most common clinical isolate
+Staphylococcus argenteus	Gram-positive	typed as S. aureus by MLST (ST2250, ST1223); must not be called S. aureus
+Staphylococcus epidermidis	Gram-positive	device infections, methicillin resistance (mecA)
+Staphylococcus haemolyticus	Gram-positive	most resistant coagulase-negative species
+Staphylococcus lugdunensis	Gram-positive	S. aureus-like virulence; separate breakpoints
+Staphylococcus capitis	Gram-positive	neonatal sepsis clone NRCS-A
+Staphylococcus hominis	Gram-positive	blood culture isolate
+Staphylococcus saprophyticus	Gram-positive	urinary tract infection
+Staphylococcus pseudintermedius	Gram-positive	zoonotic; has its own AMRFinderPlus catalogue
+Enterococcus faecalis	Gram-positive	VRE, linezolid resistance (optrA, poxtA, cfr)
+Enterococcus faecium	Gram-positive	VRE (vanA, vanB), the main hospital enterococcus
+Enterococcus gallinarum	Gram-positive	intrinsic vanC: must not be read as acquired VRE
+Enterococcus casseliflavus	Gram-positive	intrinsic vanC: must not be read as acquired VRE
+Streptococcus pneumoniae	Gram-positive	penicillin and macrolide resistance; serotyping
+Streptococcus pseudopneumoniae	Gram-positive	typed by the S. pneumoniae MLST scheme
+Streptococcus mitis	Gram-positive	mitis group; source of resistance genes for S. pneumoniae
+Streptococcus oralis	Gram-positive	mitis group; endocarditis
+Streptococcus pyogenes	Gram-positive	group A streptococcus, emm typing
+Streptococcus agalactiae	Gram-positive	group B streptococcus, neonatal sepsis
+Streptococcus dysgalactiae	Gram-positive	group C/G streptococcus
+Streptococcus anginosus	Gram-positive	abscesses
+Streptococcus gallolyticus	Gram-positive	endocarditis, colorectal cancer association
+Streptococcus suis	Gram-positive	zoonotic meningitis
+Listeria monocytogenes	Gram-positive	invasive listeriosis
+Clostridioides difficile	Gram-positive	toxin genes; has its own AMRFinderPlus catalogue
+Clostridium perfringens	Gram-positive	gas gangrene, food poisoning
+Corynebacterium diphtheriae	Gram-positive	diphtheria toxin; has its own AMRFinderPlus catalogue
+Corynebacterium striatum	Gram-positive	multidrug-resistant opportunist
+Cutibacterium acnes	Gram-positive	implant infections; frequent contaminant
+Pseudomonas aeruginosa	non-fermenter	carbapenem resistance; intrinsic efflux
+Acinetobacter baumannii	non-fermenter	carbapenem resistance (OXA-23, OXA-24/40)
+Acinetobacter pittii	non-fermenter	typed by the A. baumannii schemes; no intrinsic OXA-51
+Acinetobacter nosocomialis	non-fermenter	typed by the A. baumannii schemes; no intrinsic OXA-51
+Stenotrophomonas maltophilia	non-fermenter	intrinsic L1/L2 beta-lactamases
+Burkholderia cenocepacia	non-fermenter	cystic fibrosis; B. cepacia complex catalogue
+Burkholderia multivorans	non-fermenter	cystic fibrosis; B. cepacia complex catalogue
+Burkholderia pseudomallei	non-fermenter	melioidosis; has its own AMRFinderPlus catalogue
+Achromobacter xylosoxidans	non-fermenter	cystic fibrosis
+Haemophilus influenzae	fastidious Gram-negative	capsule typing, beta-lactamase and PBP3 mutations
+Haemophilus parainfluenzae	fastidious Gram-negative	typed close to H. influenzae
+Neisseria meningitidis	fastidious Gram-negative	shares the "neisseria" MLST scheme
+Neisseria gonorrhoeae	fastidious Gram-negative	shares the "neisseria" MLST scheme; penA, mtrR, gyrA mutations
+Neisseria lactamica	fastidious Gram-negative	shares the "neisseria" MLST scheme; commensal
+Moraxella catarrhalis	fastidious Gram-negative	respiratory infection, BRO beta-lactamase
+Campylobacter jejuni	fastidious Gram-negative	gastroenteritis; fluoroquinolone resistance
+Campylobacter coli	fastidious Gram-negative	gastroenteritis; shares a scheme with C. jejuni
+Helicobacter pylori	fastidious Gram-negative	clarithromycin resistance (23S rRNA)
+Legionella pneumophila	fastidious Gram-negative	Legionnaires' disease
+Bordetella pertussis	fastidious Gram-negative	whooping cough; macrolide resistance
+Kingella kingae	fastidious Gram-negative	paediatric osteoarticular infection
+Vibrio cholerae	Gram-negative	cholera; has its own AMRFinderPlus catalogue
+Vibrio parahaemolyticus	Gram-negative	seafood gastroenteritis
+Vibrio vulnificus	Gram-negative	necrotising wound infection
+Aeromonas hydrophila	Gram-negative	wound infection; intrinsic carbapenemase (CphA)
+Aeromonas caviae	Gram-negative	the commonest clinical Aeromonas
+Pasteurella multocida	Gram-negative	animal bites
+Elizabethkingia anophelis	Gram-negative	multidrug-resistant outbreaks
+Bacteroides fragilis	anaerobe	cfiA carbapenemase
+Proteus mirabilis	Enterobacterales	only 5 genomes in Kleborate's sketch
+Providencia stuartii	Enterobacterales	only 1 genome in Kleborate's sketch

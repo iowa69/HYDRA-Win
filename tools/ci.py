@@ -143,6 +143,10 @@ EXPECT = {
                "offline_undetermined": {
                    "spa type (Ridom)": "the Ridom spa database"},
                "offline_st": "8",
+               # Kleborate's sketch has no staphylococci: without the clinical
+               # sketch this genome was named from its MLST scheme alone. With
+               # it, the scheme and the sketch agree, and the evidence says so.
+               "offline_species_evidence": "; Mash Staphylococcus aureus (d=",
                # ecoli_vf and ecoh hold E. coli sequences and have nothing to
                # say about a staphylococcus, so they are not required here.
                "offline_databases": ("ncbi", "protein", "resfinder", "argannot",
@@ -278,6 +282,23 @@ def cmd_build_db(dist: Path) -> None:
         log(f"PROBLEM: {problem}")
     if problems:
         raise SystemExit(f"{len(problems)} problem(s) with the bundled PubMLST snapshot")
+
+
+def check_clinical_sketch(db_root: Path) -> list[str]:
+    """The clinical species sketch sits next to Kleborate's, identical to the packaged one."""
+    folder = db_root / "sketch" / "species"
+    shipped = folder / "clinical_species.msh"
+    packaged = (Path(__file__).resolve().parents[1] / "src" / "hydra_win" / "data"
+                / "clinical_species.msh")
+    if not shipped.is_file():
+        return [f"the zip has no {shipped.relative_to(db_root.parent)}"]
+    if packaged.is_file() and shipped.read_bytes() != packaged.read_bytes():
+        return [f"{shipped.name} in the zip differs from {packaged}"]
+    if not (folder / "clinical_species_sources.tsv").is_file():
+        return ["the zip has the clinical sketch but not the table of genomes behind it"]
+    if not list(folder.glob("species_mash_sketches*.msh")):
+        return ["the zip has the clinical sketch but not Kleborate's"]
+    return []
 
 
 def check_pubmlst_bundle(db_root: Path) -> list[str]:
@@ -801,7 +822,9 @@ def smoke_offline(zip_path: Path, work: Path, genome: Path, *, suffix: str = "",
         problems.append(f"fresh unzip: installed {sorted(installed)}, missing {sorted(missing)}")
     problems += check_organism_bundle(status)
     if check_zip:
-        problems += check_pubmlst_bundle(next(parent.glob(f"*/{APP}.exe")).parent / "db")
+        db_dir = next(parent.glob(f"*/{APP}.exe")).parent / "db"
+        problems += check_pubmlst_bundle(db_dir)
+        problems += check_clinical_sketch(db_dir)
     out = work / f"results offline{suffix}"
     shutil.rmtree(out, ignore_errors=True)
     log_file = work / f"smoke-offline{suffix}.log"
@@ -837,6 +860,10 @@ def smoke_offline(zip_path: Path, work: Path, genome: Path, *, suffix: str = "",
                         f"with no network")
     if summary.get("Species") != EXPECT[name]["species"]:
         problems.append(f"offline species {summary.get('Species')!r}")
+    evidence = EXPECT[name].get("offline_species_evidence")
+    if evidence and evidence not in str(summary.get("Species evidence", "")):
+        problems.append(f"offline {name}: species evidence "
+                        f"{summary.get('Species evidence')!r}, expected {evidence!r}")
     hits = _rows(wb["All_hits"])
     used = {h["Database"] for h in hits}
     wanted = set(EXPECT[name].get("offline_databases") or ())

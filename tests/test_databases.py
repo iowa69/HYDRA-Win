@@ -194,3 +194,121 @@ def test_an_http_answer_is_not_retried_through_other_routes(tmp_path, monkeypatc
     monkeypatch.setattr(netfetch, "_dead", {})
     with pytest.raises(HydraError, match="HTTP 404"):
         netfetch.fetch_once("https://x.example/f", tmp_path / "f", _first=direct)
+
+
+def test_a_version_the_source_never_stated_is_said_in_words():
+    # abricate's copies of ARG-ANNOT, MEGARes, E. coli VF and EcOH carry no
+    # version file, so upstream records "unknown". A workbook must say what is
+    # known instead: the pinned abricate commit and the retrieval date.
+    text = databases.version_text("argannot", {"version": "unknown",
+                                               "installed": "2026-08-04 00:30:41"})
+    assert "unknown" not in text
+    assert "not stated by the source" in text
+    assert databases.ABRICATE_COMMIT[:7] in text and "2026-08-04" in text
+    assert databases.version_text("card", {"version": "4.0.1",
+                                           "installed": "2026-11-01 10:00:00"}) == \
+        "4.0.1, retrieved 2026-11-01"
+    assert databases.version_text("resfinder", {}) == "not stated by the source"
+
+
+def test_the_workbook_database_row_never_says_unknown(tmp_path):
+    from hydra_amr.config import Config
+    from hydra_win import core
+
+    store = DatabaseStore(tmp_path / "db")
+    for name, version in (("ncbi", "2026-05-15.1"), ("argannot", "unknown")):
+        (store.root / "nucl" / name).mkdir(parents=True)
+        store.record(name, kind="nucl", path=f"nucl/{name}", version=version)
+    info = core._run_info(store, ["ncbi", "argannot"], [], Config(db_dir=store.root),
+                          core.Settings())
+    assert "unknown" not in info.databases
+    assert "ncbi (2026-05-15.1, retrieved " in info.databases
+    assert f"argannot (not stated by the source; abricate commit " \
+           f"{databases.ABRICATE_COMMIT[:7]}; retrieved " in info.databases
+
+
+def _species_store(root):
+    store = DatabaseStore(root)
+    folder = store.root / "sketch" / "species"
+    folder.mkdir(parents=True)
+    (folder / "species_mash_sketches.msh").write_bytes(b"kleborate")
+    store.record("species", kind="sketch", path="sketch/species",
+                 sketches=["species_mash_sketches.msh"])
+    return store, folder
+
+
+def test_the_clinical_sketch_joins_kleborates_in_the_species_folder(tmp_path, monkeypatch):
+    from hydra_amr.typing.species import SpeciesIdentifier
+
+    packaged = tmp_path / "app" / "clinical_species.msh"
+    packaged.parent.mkdir()
+    packaged.write_bytes(b"clinical v2")
+    monkeypatch.setattr(databases, "CLINICAL_SKETCH", packaged)
+    store, folder = _species_store(tmp_path / "db")
+
+    installed = databases.install_clinical_sketch(store)
+    assert installed == folder / "clinical_species.msh"
+    assert installed.read_bytes() == b"clinical v2"
+    # Upstream reads every .msh in the folder: no engine change is needed.
+    assert sorted(p.name for p in SpeciesIdentifier(store).sketches) == \
+        ["clinical_species.msh", "species_mash_sketches.msh"]
+    # The Kleborate entry keeps its own install date.
+    installed_at = store.installed()["species"]["installed"]
+    installed.write_bytes(b"clinical v1")           # a copy from an older release
+    databases.install_clinical_sketch(store)
+    assert installed.read_bytes() == b"clinical v2"
+    assert store.installed()["species"]["installed"] == installed_at
+
+
+def test_without_the_species_database_there_is_nowhere_to_put_it(tmp_path):
+    assert databases.install_clinical_sketch(DatabaseStore(tmp_path / "db")) is None
+
+
+def test_the_release_ships_the_clinical_sketch():
+    # The packaged file the build copies into db/sketch/species.
+    assert databases.CLINICAL_SKETCH.name == "clinical_species.msh"
+    assert databases.CLINICAL_SKETCH.parent.name == "data"
+
+
+def test_every_run_puts_the_clinical_sketch_in_place(tmp_path, monkeypatch):
+    # A db folder from an older release, or imported from another PC, gets
+    # the sketch on the next run, offline too: it ships with the program.
+    from types import SimpleNamespace
+
+    from hydra_win import core
+
+    packaged = tmp_path / "app" / "clinical_species.msh"
+    packaged.parent.mkdir()
+    packaged.write_bytes(b"clinical")
+    monkeypatch.setattr(databases, "CLINICAL_SKETCH", packaged)
+    store, folder = _species_store(tmp_path / "db")
+    monkeypatch.setattr(core.runtime, "prepare", lambda: SimpleNamespace(db_root=store.root))
+    monkeypatch.setattr(core.netfetch, "install", lambda: None)
+    monkeypatch.setattr(core.databases, "missing", lambda store: [])
+    monkeypatch.setattr(core.databases, "organism_missing", lambda store: [])
+    assert core.ensure_databases(offline=True) == {}
+    assert (folder / "clinical_species.msh").read_bytes() == b"clinical"
+
+
+def test_the_notice_says_where_the_clinical_sketch_comes_from(tmp_path, monkeypatch):
+    packaged = tmp_path / "app"
+    packaged.mkdir()
+    (packaged / "clinical_species.msh").write_bytes(b"clinical")
+    (packaged / "clinical_species_sources.tsv").write_text(
+        "# Genomes behind clinical_species.msh, from NCBI RefSeq, retrieved 2026-11-27.\n"
+        "# role ...\nspecies\trole\taccession\n"
+        "Neisseria gonorrhoeae\tsketch\tGCF_1\nNeisseria gonorrhoeae\tvalidation\tGCF_2\n"
+        "Staphylococcus aureus\tsketch\tGCF_3\nStaphylococcus aureus\tsketch\tGCF_4\n")
+    monkeypatch.setattr(databases, "CLINICAL_SKETCH", packaged / "clinical_species.msh")
+    monkeypatch.setattr(databases, "CLINICAL_SOURCES", packaged / "clinical_species_sources.tsv")
+    store, folder = _species_store(tmp_path / "db")
+    databases.install_clinical_sketch(store)
+    # The table of genomes travels with the sketch, so the zip carries its provenance.
+    assert (folder / "clinical_species_sources.tsv").exists()
+    assert databases.clinical_sketch_summary() == {"genomes": 3, "species": 2,
+                                                   "retrieved": "2026-11-27"}
+    databases.write_notice(store.root)
+    notice = (store.root / "DATABASES.txt").read_text(encoding="utf-8")
+    assert "clinical_species.msh" in notice
+    assert "3 genomes of 2 species" in notice and "NCBI RefSeq" in notice
+    assert "2026-11-27" in notice

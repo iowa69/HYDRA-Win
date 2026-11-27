@@ -1,7 +1,9 @@
 """A pure-Python stand-in for ``mash dist`` against a Mash sketch file.
 
-Upstream Hydra identifies species by running ``mash dist`` against the
-Kleborate species sketches. Mash has no Windows build, and without it upstream
+Upstream Hydra identifies species by running ``mash dist`` against every
+sketch in its species folder: Kleborate's (the Enterobacterales) and, in
+HYDRA-Win, the clinical sketch of 60 other species (hydra_win/data,
+tools/build_species_sketch.py). Mash has no Windows build, and without it upstream
 falls back to the MLST scheme, which misnames some genomes (several PubMLST
 *E. coli* schemes type *Klebsiella* at full length). This module reproduces
 what ``mash dist`` computes for an assembly query:
@@ -358,12 +360,31 @@ def mash_distance(ref: np.ndarray, query: np.ndarray, k: int, size: int) -> tupl
     return distance, common, denom
 
 
+#: Query sketches by (file, its size and mtime, sketch parameters). Kleborate's
+#: sketch and the clinical one share their parameters, and upstream asks for
+#: a genome's species before MLST and again after it, so without this every
+#: genome would be hashed up to four times.
+_QUERY_CACHE: dict[tuple, np.ndarray] = {}
+
+
+def _query_hashes(query: Path | str, sketch: Sketch) -> np.ndarray:
+    path = Path(query).resolve()
+    stat = path.stat()
+    key = (str(path), stat.st_size, stat.st_mtime_ns, sketch.kmer_size, sketch.sketch_size,
+           sketch.seed, sketch.noncanonical, sketch.preserve_case)
+    if key not in _QUERY_CACHE:
+        if len(_QUERY_CACHE) > 64:
+            _QUERY_CACHE.clear()
+        _QUERY_CACHE[key] = sketch_fasta(query, sketch.kmer_size, sketch.sketch_size,
+                                         sketch.seed, canonical=not sketch.noncanonical,
+                                         preserve_case=sketch.preserve_case)
+    return _QUERY_CACHE[key]
+
+
 def dist(sketch_path: Path | str, query: Path | str) -> list[tuple[str, float, int, int]]:
     """``mash dist SKETCH QUERY`` -> [(reference, distance, shared, denom)]."""
     sketch = read_sketch(sketch_path)
-    query_hashes = sketch_fasta(query, sketch.kmer_size, sketch.sketch_size, sketch.seed,
-                                canonical=not sketch.noncanonical,
-                                preserve_case=sketch.preserve_case)
+    query_hashes = _query_hashes(query, sketch)
     out = []
     for name, hashes in zip(sketch.names, sketch.hashes):
         distance, common, denom = mash_distance(hashes, query_hashes, sketch.kmer_size,
