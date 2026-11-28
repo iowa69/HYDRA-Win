@@ -61,3 +61,7 @@ python -m pytest -q
 thresholds, give both the same `--min-identity` / `--min-coverage`.
 
 `tools/compare_amrfinder.py` runs HYDRA-Win and NCBI's `amrfinder` (Linux) on the same genomes and database release and lists every call on which they differ (`docs/amrfinder_comparison.md`). `tools/build_species_sketch.py` rebuilds the clinical species sketch and writes its validation report (`docs/species_sketch_validation.md`).
+
+`tools/render_screenshots.py` refreshes the README's screenshots from a green Windows
+run: the window shots are the workflow's own, and the sheet views are rendered from that
+run's workbooks with LibreOffice.
