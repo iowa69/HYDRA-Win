@@ -442,6 +442,10 @@ def cmd_package(dist: Path, zip_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     for name in ("README.md", "LICENSE"):
         shutil.copy2(root / name, dist / name)
+    # The README's "More detail" links, so they work in the unzipped folder too.
+    (dist / "docs").mkdir(exist_ok=True)
+    for name in ("how-it-works.md", "databases.md", "building.md"):
+        shutil.copy2(root / "docs" / name, dist / "docs" / name)
     zip_path.parent.mkdir(parents=True, exist_ok=True)
     if zip_path.exists():
         zip_path.unlink()
