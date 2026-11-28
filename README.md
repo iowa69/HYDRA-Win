@@ -177,10 +177,13 @@ value.
 | Threads | All CPU cores | Changes speed only, never results |
 
 The two thresholds filter the nucleotide searches: NCBI, CARD, ResFinder, ARG-ANNOT,
-MEGARes, VFDB, *E. coli* VF, PlasmidFinder and EcOH. As in upstream, the AMRFinderPlus
-protein search keeps its own 90% identity / 90% coverage, and point mutations and
-MLST/typing keep their own rules. Values go from 0 to 100, with decimals allowed
-(`92.5` or `92,5`).
+MEGARes, VFDB, *E. coli* VF, PlasmidFinder and EcOH. The AMRFinderPlus protein search
+keeps AMRFinderPlus's own rule: the identity NCBI curates for each gene family (98% for
+the *aac(3)* and *dfrA* families, 85% for *cfr*, 90% where NCBI sets none) over 90% of
+the protein, and an allele name only for an exact match (see
+[How the calls compare with AMRFinderPlus](#how-the-calls-compare-with-amrfinderplus)).
+Point mutations and MLST/typing keep their own rules. Values go from 0 to 100, with
+decimals allowed (`92.5` or `92,5`).
 
 #### Confident calls
 
@@ -188,14 +191,24 @@ The settings decide what is *found*. What is *counted* is fixed, whatever they a
 set to: the Summary sheet, the window and `Cumulative_results.xlsx` count and list an
 AMR gene only when it is a **confident call** — at least one database at that locus
 matches it at **≥ 90% identity over ≥ 90% of the reference gene**, complete (not cut by
-a contig end, no internal stop codon). 90% identity is AMRFinderPlus's own minimum for
-a BLAST-based hit where it has no curated cut-off, and below 90% coverage AMRFinderPlus
-and upstream Hydra both call a hit PARTIAL.
+a contig end, no internal stop codon, not split by inserted sequence). In the
+AMRFinderPlus protein search the identity is the curated cut-off NCBI sets for that gene
+family where it sets one, as AMRFinderPlus itself applies it; 90% is its minimum where it
+sets none, and below 90% coverage AMRFinderPlus and upstream Hydra both call a hit
+PARTIAL.
+
+A gene is also counted **only where the AMRFinderPlus protein search calls it too**.
+MEGARes and ARG-ANNOT also hold the chromosomal efflux pumps, regulators and housekeeping
+genes that NCBI leaves out of AMRFinderPlus on purpose (*acrA*, *cpxAR*, *mexQ*). Counted,
+they gave a typical *E. coli* 54-60 "AMR genes" where AMRFinderPlus finds 3-10. A
+confident call that only those catalogues make is listed under **AMR genes in other
+catalogues only (not counted)**, and its sheet row says
+`not counted: AMRFinderPlus does not report this gene`.
 
 Every other AMR hit is listed under **AMR genes to check (below the confident-call
 bar)**, with the reason (`blaTEM-1 (partial: 72.4% of the reference gene)`), and every
 hit stays on its sheet with a **Confident call** column. A drug class is listed when a
-confident gene *or* an established point mutation is behind it, so `gyrA` S83I puts
+counted gene *or* an established point mutation is behind it, so `gyrA` S83I puts
 quinolones on the Summary with no *qnr* gene present.
 
 Every workbook's `Summary` sheet records the settings used in a *Settings used*
@@ -272,7 +285,7 @@ For each genome, `<results>\<genome>\<genome>.xlsx` contains these sheets:
 
 | Sheet | Contents |
 | --- | --- |
-| `Summary` | Any analysis not performed because a database is missing (first, highlighted), species, MLST scheme/ST/profile, scores (resistance 0-3, ESBL, carbapenemase, colistin, virulence), counts per category (AMR genes: confident calls only), detected genes per category, the AMR genes to check with the reason, each point mutation and disruption in one sentence with its resistance, lineage/serotype typing, assembly QC, the settings used, and database versions and thresholds |
+| `Summary` | Any analysis not performed because a database is missing (first, highlighted), species, MLST scheme/ST/profile, scores (resistance 0-3, ESBL, carbapenemase, colistin, virulence), counts per category (AMR genes: confident calls the AMRFinderPlus search makes too), detected genes per category, the AMR genes to check with the reason, the confident calls only other catalogues make (not counted), each point mutation and disruption in one sentence with its resistance, lineage/serotype typing, assembly QC, the settings used, and database versions and thresholds |
 | `AMR_genes` | Every acquired AMR hit and every stress hit (biocide/metal/heat), with a *Confident call* column (`confident`, or `check:` and the reason) |
 | `Point_mutations` | Resistance point mutations and gene disruptions: what changed, where and what it means first, then the raw hit columns (see below) |
 | `Virulence` | Virulence factor hits |
@@ -463,8 +476,10 @@ contains:
 
 HYDRA-Win runs upstream Hydra's own analysis code. It uses a pinned copy of
 `hydra_amr` from [iowa69/hydra](https://github.com/iowa69/hydra) at commit `75ecbe8`
-(merged, and released upstream as Hydra 1.4.0), with two small,
-documented Windows patches (see `src/hydra_amr/VENDORED.txt`). With Automatic settings,
+(merged, and released upstream as Hydra 1.4.0), with six documented patches (see
+`src/hydra_amr/VENDORED.txt`): two for Windows, and four that belong upstream (species
+named by the clinical sketch, AMRFinderPlus's own cut-offs and names, and gene pieces
+no longer joined across an insertion). With Automatic settings,
 the calls match upstream's `--preset deep`:
 
 * every installed gene database
@@ -496,6 +511,57 @@ Two pieces are added for Windows:
   works from folders like `C:\Users\Jörg Müller\Downloads`. Its databases are built in
   BLAST's version-4 format, which has no LMDB index; on Windows each LMDB file takes up
   its full gigabyte-sized map.
+
+### How the calls compare with AMRFinderPlus
+
+HYDRA-Win doesn't run NCBI's `amrfinder` program, which NCBI builds for Linux and macOS
+only. It searches AMRFinderPlus's own database with upstream Hydra's BLAST code, and
+applies AMRFinderPlus's own rules, read from that database and from NCBI's source code
+(`amr_report.cpp`), rather than rules of its own:
+
+* **NCBI's curated cut-off for each gene family** (826 families: 98% for the *aac(3)* and
+  *dfrA* families, 85% for *cfr*), moving up to the parent family when a hit misses its
+  own family's cut-off, and 90% where NCBI sets none.
+* **An allele name only for an exact match.** Anything less is named by its family, with
+  the closest allele next to it: `blaKPC (closest blaKPC-2)`. One amino acid can be a
+  different allele with a different phenotype (KPC-33 is KPC-2 plus D179Y).
+* A TTG or GTG start codon reads as methionine. A premature stop codon makes the call
+  `INTERNAL_STOP`. A fusion gene carries both its names (`aac(6')-Ie/aph(2'')-Ia`). Two
+  pieces of a gene split by an insertion are not joined into one "complete" gene.
+* A gene family NCBI marks as not reportable is not reported (*Salmonella*'s chromosomal
+  *aac(6')-Iy*, for example).
+
+`tools/compare_amrfinder.py` measures the result against AMRFinderPlus 4.2.7 itself, on
+48 RefSeq genomes of 16 species (one complete genome and two drafts each) and the same
+database release (2026-10-29.1). Every call is in
+[docs/amrfinder_comparison.md](docs/amrfinder_comparison.md).
+
+* **All 392 AMR gene calls AMRFinderPlus makes** are found at the same place, under the
+  same name. HYDRA-Win 0.6.0 used AMRFinderPlus's name for 336 of them; it printed
+  internal family IDs such as `fosA5_fam` and allele names on inexact matches.
+* **All 380 genes AMRFinderPlus calls complete are counted on the Summary**, and almost
+  nothing else is: counted by gene name, the Summary's AMR genes are AMRFinderPlus's in
+  44 of the 48 genomes (a median of 6 per genome on both; 13 in 0.6.0). The four that
+  differ are explained below.
+* **114 of 117 point mutations agree.** The three missed are an insertion in *E. coli*
+  *ftsI* (YRIN) and a promoter deletion in gonococcal *mtrR* (A-53del).
+
+What still differs:
+
+* There's no HMM search: HMMER isn't in the Windows bundle. One *E. coli* *emrD* that
+  AMRFinderPlus drops is reported.
+* AMRFinderPlus's mosaic-PBP calls (*S. pneumoniae* *pbp1a*/*pbp2b*/*pbp2x*, and the
+  gonococcal *penA*, which AMRFinderPlus names *pbp2*) aren't made, because upstream
+  Hydra doesn't import the database file they come from (`AMRProt-susceptible.fa`). The
+  PBP point mutations themselves are reported.
+* A partial gene at a contig end is reported as partial, not as "contig end". Either
+  way it's listed to check, not counted.
+* A *catB3* that AMRFinderPlus calls 70% partial is counted, because ARG-ANNOT's shorter
+  *catB4* reference matches it complete.
+* 522 confident calls that only MEGARes (455), ARG-ANNOT (53), NCBI's nucleotide set
+  (7) or ResFinder (7) make are listed under *other catalogues only* and not counted.
+  They include a 943 bp MEGARes sequence labelled "CTX" that no other catalogue
+  recognises, found in 15 of the 48 genomes.
 
 **Limitations**
 

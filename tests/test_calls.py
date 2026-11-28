@@ -62,6 +62,8 @@ def _with_partial_tem(name="g1"):
     result = _result(name)
     result.hits.append(_hit(name, "ncbi", "blaTEM-1", start=40000, end=40620, coverage=72.4,
                             resolution="PARTIAL"))
+    result.hits.append(_hit(name, "protein", "blaTEM-1", start=40000, end=40620, coverage=72.0,
+                            resolution="PARTIAL", method="PARTIALX", primary=False))
     return result
 
 
@@ -95,10 +97,11 @@ def test_the_hit_tables_say_which_calls_are_confident(tmp_path):
     path = excel.write_genome_workbook(_with_partial_tem(), tmp_path / "g1.xlsx",
                                        excel.RunInfo(app_version="test"),
                                        databases=("ncbi", "protein", "card"))
-    rows = {r["Gene"]: r for r in _table(load_workbook(path)["AMR_genes"])}
-    assert rows["blaKPC-2"]["Confident call"] == "confident"
-    assert rows["blaTEM-1"]["Confident call"] == "check: partial: 72.4% of the reference gene"
-    assert rows["KPC-2"]["Confident call"] == "-"                    # redundant: the KPC locus is judged once
+    rows = {(r["Gene"], r["Database"]): r for r in _table(load_workbook(path)["AMR_genes"])}
+    assert rows["blaKPC-2", "ncbi"]["Confident call"] == "confident"
+    assert rows["blaTEM-1", "ncbi"]["Confident call"] == \
+        "check: partial: 72.4% of the reference gene"
+    assert rows["KPC-2", "card"]["Confident call"] == "-"                    # redundant: the KPC locus is judged once
 
 
 def test_the_window_counts_only_confident_genes():
@@ -121,3 +124,180 @@ def test_the_settings_dialog_says_the_bar_is_fixed():
     text = core.explain_automatic()
     assert "confident" in text and "90%" in text
     assert "not a setting" in text
+
+
+# ---- AMRFinderPlus's curated cut-offs (HYDRA-WIN PATCH 5) ----------------------
+def _protein(gene, identity, rule_identity, closest=""):
+    hit = _hit("g", "protein", gene, start=1, end=1050, identity=identity, method="BLASTX")
+    hit.rule_identity, hit.closest = rule_identity, closest
+    return hit
+
+
+def test_an_amrfinderplus_hit_is_held_to_its_familys_curated_cutoff():
+    # NCBI curates cfr at 85%: an 87% cfr is a cfr, and AMRFinderPlus reports it.
+    assert calls.judge([_protein("cfr", 87.0, 85.0)]).confident
+
+
+def test_an_amrfinderplus_hit_below_its_familys_cutoff_is_not_confident():
+    # Only reachable when someone overrides the protein identity upstream.
+    verdict = calls.judge([_protein("aac(3)-IIa", 95.0, 98.0)])
+    assert not verdict.confident
+    assert verdict.reason == ("95% identity, below the 98% NCBI requires for this gene "
+                              "family: a related gene, not necessarily this one")
+
+
+def test_other_databases_keep_the_fixed_90_percent_bar():
+    assert not calls.judge([_hit("g", "resfinder", "cfr_1", start=1, end=1050,
+                                 identity=87.0)]).confident
+
+
+def test_the_rule_text_names_the_curated_cutoffs():
+    assert "curated" in calls.RULE_TEXT and "90%" in calls.RULE_TEXT
+
+
+def test_the_gene_sheet_shows_the_closest_allele_of_a_family_call(tmp_path):
+    result = _result("g1")
+    result.hits.append(_protein("blaCTX-M", 99.7, 90.0, closest="blaCTX-M-15"))
+    path = excel.write_genome_workbook(result, tmp_path / "g1.xlsx",
+                                       excel.RunInfo(app_version="test"),
+                                       databases=("ncbi", "protein"))
+    rows = {r["Gene"]: r for r in _table(load_workbook(path)["AMR_genes"])}
+    assert rows["blaCTX-M"]["Closest allele (when named by family)"] == "blaCTX-M-15"
+    assert rows["blaKPC-2"]["Closest allele (when named by family)"] in ("", None)
+
+
+def test_the_settings_dialog_says_the_protein_search_uses_curated_cutoffs():
+    from hydra_win import core
+
+    text = core.explain_automatic()
+    assert "curated cut-off" in text
+    assert "(90% / 90%)" not in text
+
+
+def test_the_run_info_says_the_protein_search_uses_curated_cutoffs(tmp_path):
+    from hydra_amr.config import Config
+    from hydra_amr.db.manager import DatabaseStore
+    from hydra_win import core
+
+    store = DatabaseStore(tmp_path / "db")
+    info = core._run_info(store, [], [], Config(db_dir=store.root), core.Settings())
+    assert "protein: NCBI's curated identity cut-off for each gene family" in info.thresholds
+
+
+def test_the_summary_names_a_family_call_with_its_closest_allele(tmp_path):
+    result = _result("g1")
+    result.hits.append(_protein("blaCTX-M", 99.7, 90.0, closest="blaCTX-M-15"))
+    path = excel.write_genome_workbook(result, tmp_path / "g1.xlsx",
+                                       excel.RunInfo(app_version="test"),
+                                       databases=("ncbi", "protein"))
+    summary = {r[0]: r[1] for r in load_workbook(path)["Summary"].iter_rows(values_only=True)
+               if r[0]}
+    assert "blaCTX-M (closest blaCTX-M-15)" in summary["AMR genes (names)"]
+    # One matrix column per family, whatever allele each genome is closest to.
+    columns, _ = excel.matrix_data([result], (excel.AMR,))
+    assert ("BETA-LACTAM", "blaCTX-M") in columns
+
+
+# ---- genes split by inserted sequence ---------------------------------------
+def test_a_gene_split_by_an_insertion_is_not_confident():
+    # Both pieces of a blaZ interrupted by ~5.5 kb, joined into one "complete"
+    # match: AMRFinderPlus reports only the larger piece, as a partial.
+    hit = _hit("g", "ncbi", "blaZ", start=7691, end=14102, coverage=100.0)
+    hit.coverage = "1-399,400-846/846"
+    verdict = calls.judge([hit])
+    assert not verdict.confident
+    assert verdict.reason == ("interrupted: the match is split by 5566 bp of other sequence "
+                              "(an insertion), so the gene may not be functional")
+
+
+def test_a_protein_match_is_measured_in_codons():
+    hit = _protein("blaZ", 100.0, 90.0)
+    hit.start, hit.end, hit.coverage = 7691, 14102, "1-133,134-282/282"
+    assert calls.judge([hit]).reason.startswith("interrupted: the match is split by 5566 bp")
+
+
+def test_a_few_bases_of_indel_do_not_interrupt_a_gene():
+    hit = _hit("g", "ncbi", "blaKPC-2", start=1000, end=1890)     # 882 bp gene + 9 bp
+    hit.coverage = "1-882/882"
+    assert calls.judge([hit]).confident
+
+
+def test_another_database_cannot_confirm_a_gene_with_an_internal_stop():
+    # A nucleotide match cannot see the stop: one nonsense mutation still reads
+    # 99.7% identical, and AMRFinderPlus reports the blaTEM as INTERNAL_STOP.
+    stopped = _protein("blaTEM", 99.3, 90.0, closest="blaTEM-1")
+    stopped.method = stopped.resolution = "INTERNAL_STOP"
+    verdict = calls.judge([stopped, _hit("g", "ncbi", "blaTEM-1", start=1, end=1050,
+                                         identity=99.7, primary=False)])
+    assert not verdict.confident
+    assert verdict.reason == "internal stop codon: may not be functional"
+
+
+# ---- counted only where AMRFinderPlus reports the gene ----------------------
+# MEGARes and ARG-ANNOT also hold the chromosomal efflux pumps, regulators and
+# housekeeping genes NCBI leaves out of AMRFinderPlus: 523 of them across 48
+# benchmark genomes (docs/amrfinder_comparison.md), 54-60 "AMR genes" for an
+# E. coli where AMRFinderPlus finds 3-10.
+def _with_megares_only(name="g1", **kw):
+    result = _result(name)
+    result.hits.append(_hit(name, "megares", "ACRA", start=60000, end=61194, identity=99.7,
+                            drug_class="EFFLUX", **kw))
+    return result
+
+
+def _summary(tmp_path, result):
+    path = excel.write_genome_workbook(result, tmp_path / f"{result.sample}.xlsx",
+                                       excel.RunInfo(app_version="test"),
+                                       databases=("ncbi", "protein", "megares"))
+    return path, {r[0]: r[1] for r in load_workbook(path)["Summary"].iter_rows(values_only=True)
+                  if r[0]}
+
+
+def test_a_gene_only_another_catalogue_reports_is_not_counted(tmp_path):
+    _, summary = _summary(tmp_path, _with_megares_only())
+    assert summary["AMR genes"] == 2
+    assert "ACRA" not in summary["AMR genes (names)"]
+    assert summary[excel.OTHER_TITLE] == 1
+    assert summary[f"{excel.OTHER_TITLE} (names)"] == "ACRA (megares)"
+
+
+def test_drug_classes_follow_only_the_counted_genes():
+    assert "EFFLUX" not in excel.amr_classes(_with_megares_only())
+
+
+def test_the_gene_sheet_says_why_a_gene_is_not_counted(tmp_path):
+    path, _ = _summary(tmp_path, _with_megares_only())
+    rows = {(r["Gene"], r["Database"]): r for r in _table(load_workbook(path)["AMR_genes"])}
+    assert rows["ACRA", "megares"]["Confident call"] == \
+        "not counted: AMRFinderPlus does not report this gene"
+
+
+def test_a_weak_hit_only_another_catalogue_has_is_not_listed_to_check(tmp_path):
+    _, summary = _summary(tmp_path, _with_megares_only(coverage=70.0, resolution="PARTIAL"))
+    assert "ACRA" not in summary[f"{excel.TO_CHECK_TITLE} (names)"]
+    assert summary[excel.OTHER_TITLE] == 0
+
+
+def test_the_window_counts_only_what_amrfinderplus_reports():
+    assert excel.headline(_with_megares_only())["amr"] == 2
+
+
+def test_the_cumulative_summary_lists_other_catalogues_only(tmp_path):
+    path = excel.write_cumulative_workbook([_with_megares_only("g1"), _result("g2")],
+                                           tmp_path / "Cumulative_results.xlsx",
+                                           excel.RunInfo(app_version="test"))
+    rows = {r["Assembly"]: r for r in _table(load_workbook(path)["Summary"])}
+    assert rows["g1"]["AMR genes (n)"] == 2
+    assert rows["g1"][excel.OTHER_TITLE] == "ACRA (megares)"
+    assert rows["g2"][excel.OTHER_TITLE] in ("", None)
+
+
+def test_the_rule_text_says_only_amrfinderplus_genes_are_counted():
+    assert "AMRFinderPlus protein search" in calls.RULE_TEXT
+    assert "other catalogues only" in calls.RULE_TEXT
+
+
+def test_the_settings_dialog_says_other_catalogues_alone_are_not_counted():
+    from hydra_win import core
+
+    assert "only other catalogues" in core.explain_automatic()

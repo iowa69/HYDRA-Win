@@ -251,7 +251,16 @@ def _query_gap(a: Hsp, b: Hsp) -> int:
     return 0
 
 
-def merge_hsps(hsps: Sequence[Hsp], *, max_hsp_gap: int | None = None,
+#: HYDRA-WIN PATCH 6 (see VENDORED.txt): the most query sequence (bp) allowed
+#: between two HSPs merged into one hit. Pieces further apart are a gene split
+#: by an insertion or an assembly gap, which AMRFinderPlus reports as partial;
+#: joined, they made one "complete" gene with the insertion inside it, and a
+#: gene that was the insertion was filed as a duplicate of the joined one.
+#: Pieces that touch, as blastx splits a frameshifted gene, still merge.
+MAX_HSP_GAP = 60
+
+
+def merge_hsps(hsps: Sequence[Hsp], *, max_hsp_gap: int | None = MAX_HSP_GAP,
                query_scale: float = 1.0, span_slack: int = 5000) -> list[MergedHit]:
     """Group HSPs by (query, subject) and merge them on the subject axis.
 

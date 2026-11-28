@@ -292,13 +292,18 @@ def explain_automatic() -> str:
             f"{t.min_identity:g}% identity over {t.min_coverage:g}% of the reference gene, "
             f"except where a database sets a stricter default ({special}). A value you enter "
             "replaces these for every nucleotide database, exactly like upstream's "
-            "--min-identity / --min-coverage. The AMRFinderPlus protein search "
-            f"({t.protein_min_identity:g}% / {t.protein_min_coverage:g}%), point mutations "
-            "and MLST/typing keep their own rules. Threads change speed, never results. "
-            f"Whatever these are set to, the Summary counts an AMR gene only as a confident "
-            f"call: >= {calls.CONFIDENT_IDENTITY:g}% identity over >= "
-            f"{calls.CONFIDENT_COVERAGE:g}% of the gene, complete. That bar is fixed, not a "
-            "setting; every other hit is listed as 'to check' with the reason.")
+            "--min-identity / --min-coverage. The AMRFinderPlus protein search keeps "
+            "AMRFinderPlus's own rule: the curated cut-off NCBI sets for each gene family "
+            f"({t.protein_min_identity:g}% identity where it sets none) over "
+            f"{t.protein_min_coverage:g}% of the protein, and a gene is named by its allele "
+            "only on an exact match. Point mutations and MLST/typing keep their own rules. "
+            "Threads change speed, never results. Whatever these are set to, the Summary "
+            f"counts an AMR gene only as a confident call: >= {calls.CONFIDENT_IDENTITY:g}% "
+            f"identity (the family's curated cut-off in the protein search) over >= "
+            f"{calls.CONFIDENT_COVERAGE:g}% of the gene, complete, and only where the "
+            "AMRFinderPlus protein search calls it too: a gene only other catalogues report "
+            "is listed apart, not counted. That bar is fixed, not a setting; every other hit "
+            "is listed as 'to check' with the reason.")
 
 
 @dataclass
@@ -486,8 +491,10 @@ def _run_info(store: DatabaseStore, used: Sequence[str], missing: Sequence[str],
                     else f"{t.min_coverage:g}% (set by user)")
         nucleotide = (f"nucleotide >= {identity} identity / {coverage} coverage; a value set "
                       "by the user applies to every nucleotide database")
-    thresholds = (f"{nucleotide}; protein >= {t.protein_min_identity:g}% / "
-                  f"{t.protein_min_coverage:g}%; point mutations >= "
+    thresholds = (f"{nucleotide}; protein: NCBI's curated identity cut-off for each gene "
+                  f"family ({t.protein_min_identity:g}% where it sets none) / "
+                  f"{t.protein_min_coverage:g}% coverage, as AMRFinderPlus applies it; "
+                  "point mutations >= "
                   f"{t.mutation_min_identity:g}% / {t.mutation_min_coverage:g}%; "
                   "AMRFinderPlus --plus elements on. Confident call (counted on the "
                   f"Summary): {calls.RULE_TEXT}")

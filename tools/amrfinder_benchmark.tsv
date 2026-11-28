@@ -1,0 +1,52 @@
+# Genomes tools/compare_amrfinder.py compares HYDRA-Win and AMRFinderPlus on.
+# Drawn by --pick: per species, one complete genome and two drafts, a seeded
+# random sample of RefSeq assemblies that pass NCBI's ANI taxonomy check.
+species	accession	assembly_name	level	strain
+Klebsiella pneumoniae	GCF_028221125.1	ASM2822112v1	Complete Genome	CRKP_24
+Klebsiella pneumoniae	GCF_900092995.1	18090_8#39	Scaffold	PB39
+Klebsiella pneumoniae	GCF_048627465.1	ASM4862746v1	Contig	kp411
+Escherichia coli	GCF_004010635.1	ASM401063v1	Complete Genome	06-3462
+Escherichia coli	GCF_011291795.1	ASM1129179v1	Scaffold	K19CRE38
+Escherichia coli	GCF_014901655.1	ASM1490165v1	Scaffold	UCI165
+Salmonella enterica	GCF_016071195.1	ASM1607119v1	Complete Genome	GX1006
+Salmonella enterica	GCF_024242175.1	ASM2424217v1	Scaffold	GDC200604
+Salmonella enterica	GCF_001833155.1	ASM183315v1	Contig	CFSAN044905
+Enterobacter hormaechei	GCF_050162345.1	ASM5016234v1	Complete Genome	A26352
+Enterobacter hormaechei	GCF_056898415.1	ASM5689841v1	Contig	
+Enterobacter hormaechei	GCF_016773065.1	ASM1677306v1	Contig	CPO089
+Citrobacter freundii	GCF_034377565.1	ASM3437756v1	Complete Genome	
+Citrobacter freundii	GCF_004801115.1	ASM480111v1	Scaffold	P106E PI
+Citrobacter freundii	GCF_001546285.1	ASM154628v1	Scaffold	GED7749C
+Serratia marcescens	GCF_017301275.1	ASM1730127v1	Complete Genome	ATCC 13880 substr. Sm_S13_jyu2015
+Serratia marcescens	GCF_001539565.1	12082_3#1	Scaffold	2880STDY5682893
+Serratia marcescens	GCF_040562615.1	ASM4056261v1	Contig	SM7
+Acinetobacter baumannii	GCF_023360975.1	ASM2336097v1	Complete Genome	6080
+Acinetobacter baumannii	GCF_051216185.1	ASM5121618v1	Contig	AB228*S
+Acinetobacter baumannii	GCF_001612415.1	ASM161241v1	Scaffold	AB4991
+Pseudomonas aeruginosa	GCF_002192475.1	ASM219247v1	Complete Genome	Pa124
+Pseudomonas aeruginosa	GCF_028331285.1	ASM2833128v1	Scaffold	IIVV-SD1
+Pseudomonas aeruginosa	GCF_056493585.1	ASM5649358v1	Scaffold	P2749
+Staphylococcus aureus	GCF_008620055.1	ASM862005v1	Complete Genome	KUH180062
+Staphylococcus aureus	GCF_003017495.1	ASM301749v1	Contig	29397-1
+Staphylococcus aureus	GCF_900126025.1	17175_2#35	Scaffold	3688STDY6124906
+Enterococcus faecium	GCF_056825595.1	ASM5682559v1	Complete Genome	YT1
+Enterococcus faecium	GCF_902160955.1	25426_7#225	Scaffold	4928STDY7071487
+Enterococcus faecium	GCF_003320655.1	ASM332065v1	Scaffold	62EA1
+Enterococcus faecalis	GCF_046109925.1	ASM4610992v1	Complete Genome	DJH702_8
+Enterococcus faecalis	GCF_900447795.1	50279_F02	Contig	NCTC13780
+Enterococcus faecalis	GCF_051547945.1	ASM5154794v1	Contig	CBUKC0386
+Streptococcus pneumoniae	GCF_034422215.1	ASM3442221v1	Complete Genome	16H2017-2
+Streptococcus pneumoniae	GCF_900046725.1	12754_3#42	Scaffold	2842STDY5753703
+Streptococcus pneumoniae	GCF_060529165.1	ASM6052916v1	Contig	LQ202138438
+Streptococcus agalactiae	GCF_000007265.1	ASM726v1	Complete Genome	2603V/R
+Streptococcus agalactiae	GCF_001160905.1	6630_7#20	Scaffold	IT-NI-036
+Streptococcus agalactiae	GCF_001162145.1	6630_7#1	Scaffold	DE-NI-033
+Neisseria gonorrhoeae	GCF_027920425.1	ASM2792042v1	Complete Genome	MS11 HL-1-22
+Neisseria gonorrhoeae	GCF_061270645.1	ASM6127064v1	Scaffold	B01517
+Neisseria gonorrhoeae	GCF_061313815.1	ASM6131381v1	Scaffold	NG885
+Campylobacter jejuni	GCF_033097265.1	ASM3309726v1	Complete Genome	IDH-12448
+Campylobacter jejuni	GCF_001232665.1	7213_3#7	Scaffold	OXC6550
+Campylobacter jejuni	GCF_046635765.1	ASM4663576v1	Contig	CNH-HAT-1
+Clostridioides difficile	GCF_024972555.1	ASM2497255v1	Complete Genome	CD060
+Clostridioides difficile	GCF_051917645.1	ASM5191764v1	Contig	Guelph51
+Clostridioides difficile	GCF_900164635.1	16852_2#13	Scaffold	VRECD0008

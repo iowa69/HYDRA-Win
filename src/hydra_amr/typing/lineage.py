@@ -495,7 +495,9 @@ def esbl_alleles(db_root: Path) -> frozenset[str]:
 
 
 def _family_of(hit: Hit) -> str:
-    return (hit.gene or "").lower()
+    # HYDRA-WIN PATCH 5: a call named by its gene family (blaCTX-M) is scored
+    # by its closest allele (blaCTX-M-15), as it was before the renaming.
+    return (getattr(hit, "closest", "") or hit.gene or "").lower()
 
 
 def _strip_bla(name: str) -> str:

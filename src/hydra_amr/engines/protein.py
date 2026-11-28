@@ -10,18 +10,27 @@ from a separate ``blastn`` against the organism's reference loci.
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 from ..config import Config
 from ..db.manager import DatabaseStore, makeblastdb
+from ..db.registry import protein_dir
 from ..records import Hit
 from ..seqio import read_fasta, read_fasta_dict, read_fasta_subset
 from ..utils import LOG, natural_key, revcomp, translate
 from .blast import (Hsp, blast, check_db_exists, deduplicate, interval_length,
                     merge_hsps, merge_intervals, overlap_length)
+from .families import FamilyRules
 from .mutations import MutationCatalog, evaluate, multi_residue, walk_alignment
 from .nucl import QueryBatch
 
+
+#: HYDRA-WIN PATCH 5: the initiation codons of the bacterial code (NCBI table
+#: 11). A gene that starts with one is read from methionine, so a TTG- or
+#: GTG-initiated gene identical to its reference is an exact match, as
+#: AMRFinderPlus calls it, although blastx translates that codon as L or V.
+START_CODONS = frozenset({"ATG", "GTG", "TTG", "CTG", "ATT", "ATC", "ATA"})
 
 #: The K. pneumoniae species complex, where most rules below are established.
 _KPSC = {"Klebsiella_pneumoniae", "Klebsiella_oxytoca",
@@ -276,12 +285,30 @@ class ProteinScreener:
         self.store = store
         self.config = config
         self._catalogs: dict[str | None, MutationCatalog] = {}
+        self._rules: FamilyRules | None | bool = False
 
     def catalog(self, organism: str | None) -> MutationCatalog:
         """Mutation catalogue for one organism, built once and reused."""
         if organism not in self._catalogs:
             self._catalogs[organism] = MutationCatalog(self.store.root, organism)
         return self._catalogs[organism]
+
+    def family_rules(self) -> FamilyRules | None:
+        """HYDRA-WIN PATCH 5: AMRFinderPlus's curated per-family cut-offs.
+
+        An identity given explicitly (--protein-min-identity) replaces every
+        curated one, as ``amrfinder -i`` does; otherwise each family's own
+        applies, and 90% where NCBI sets none.
+        """
+        if self._rules is False:
+            thresholds = self.config.thresholds
+            explicit = thresholds.was_set("protein_min_identity")
+            self._rules = FamilyRules.load(
+                protein_dir(self.store.root),
+                identity=thresholds.protein_min_identity if explicit else None,
+                partial_coverage=thresholds.protein_partial_coverage,
+                complete_coverage=thresholds.protein_min_coverage)
+        return self._rules
 
     # ------------------------------------------------------------------ genes
     def _lof_reference_fasta(self, handle, workdir: Path) -> Path | None:
@@ -509,9 +536,55 @@ class ProteinScreener:
                 if not ("nonsense" in hit.note and hit.gene in stops))
         return results
 
+    @staticmethod
+    def _read_start_codons(batch: QueryBatch, hsps: list[Hsp]) -> list[Hsp]:
+        """HYDRA-WIN PATCH 5: an alternative start codon matches the reference's Met."""
+        candidates = [h for h in hsps if h.sub_lo == 1 and h.sseq[:1] == "M"
+                      and h.qseq[:1] not in ("", "M", "-")]
+        if not candidates:
+            return hsps
+        sequences = read_fasta_subset(batch.path, {h.qseqid for h in candidates})
+        fixed: dict[int, Hsp] = {}
+        for hsp in candidates:
+            seq = sequences.get(hsp.qseqid, "")
+            codon = (seq[hsp.q_lo - 1:hsp.q_lo + 2] if hsp.strand == "+"
+                     else revcomp(seq[max(0, hsp.q_hi - 3):hsp.q_hi]))
+            if codon.upper() in START_CODONS:
+                nident = hsp.nident + 1
+                fixed[id(hsp)] = dataclasses.replace(
+                    hsp, nident=nident, mismatch=max(0, hsp.mismatch - 1),
+                    pident=100.0 * nident / hsp.length if hsp.length else hsp.pident,
+                    qseq="M" + hsp.qseq[1:])
+        return [fixed.get(id(h), h) for h in hsps]
+
+    def _fusion_parts(self, handle) -> dict[str, list[dict]]:
+        """HYDRA-WIN PATCH 5: accession -> the metadata of each part, in order."""
+        cached = getattr(self, "_fusions", None)
+        if cached is not None and cached[0] is handle:
+            return cached[1]
+        parts: dict[str, list[dict]] = {}
+        for meta in (getattr(handle, "meta", None) or {}).values():
+            if int(meta.get("fusion_total") or 1) > 1:
+                parts.setdefault(meta.get("accession", ""), []).append(meta)
+        for rows in parts.values():
+            rows.sort(key=lambda m: int(m.get("fusion_part") or 0))
+        self._fusions = (handle, parts)
+        return parts
+
     def _call_genes(self, batch: QueryBatch, hsps: list[Hsp], handle,
                     organism_by_sample: dict[str, str | None],
                     thresholds) -> dict[str, list[Hit]]:
+        hsps = self._read_start_codons(batch, hsps)
+        # HYDRA-WIN PATCH 5: a stop codon before the end of the reference makes the
+        # call INTERNAL_STOP, as in AMRFinderPlus: the gene may not be functional.
+        # Every reference ends with its own '*', so a stop aligned to that one is
+        # simply where the gene ends.
+        stops: dict[tuple, list[tuple[int, int]]] = {}
+        for hsp in hsps:
+            if any(q == "*" and s != "*" for q, s in zip(hsp.qseq, hsp.sseq)):
+                stops.setdefault((hsp.qseqid, hsp.sseqid, hsp.strand), []).append(
+                    (hsp.q_lo, hsp.q_hi))
+        fusions = self._fusion_parts(handle)
         merged = merge_hsps(hsps, query_scale=3.0)
         per_sample: dict[str, list[tuple]] = {}
         for hit in merged:
@@ -535,9 +608,33 @@ class ProteinScreener:
                 continue
             if hit.coverage_pct < thresholds.protein_partial_coverage:
                 continue
-            if hit.identity_pct < thresholds.protein_min_identity:
-                continue
-            per_sample.setdefault(piece.sample, []).append((hit, piece, meta))
+            # HYDRA-WIN PATCH 5: each gene family's curated cut-off, applied as
+            # AMRFinderPlus applies it. The susceptible references sit outside its
+            # hierarchy there too, and keep the default rule.
+            rules = self.family_rules()
+            assignment = None
+            if rules is None or accession in catalog.susceptible:
+                if hit.identity_pct < thresholds.protein_min_identity:
+                    continue
+            else:
+                exact = hit.identity_pct >= 99.999 and hit.coverage_pct >= 99.999
+                parts = fusions.get(accession) if int(meta.get("fusion_total") or 1) > 1 else None
+                if parts:
+                    # A fusion protein is named by every part (aac(6')-Ie/aph(2'')-Ia),
+                    # and half of one is not reported (amr_report.cpp, PD-1032).
+                    if hit.coverage_pct < thresholds.protein_min_coverage:
+                        continue
+                    assignment = rules.assign_fusion(
+                        [(m.get("gene", ""), m.get("fam_id", ""), int(m.get("reportable") or 2))
+                         for m in parts], hit.identity_pct, hit.coverage_pct, exact=exact)
+                else:
+                    assignment = rules.assign(
+                        meta.get("gene", hit.sseqid), meta.get("fam_id", ""), hit.identity_pct,
+                        hit.coverage_pct, exact=exact,
+                        reference_reportable=int(meta.get("reportable") or 2))
+                if assignment is None or not assignment.reportable:
+                    continue
+            per_sample.setdefault(piece.sample, []).append((hit, piece, meta, assignment))
 
         out: dict[str, list[Hit]] = {}
         for sample, entries in per_sample.items():
@@ -552,17 +649,34 @@ class ProteinScreener:
                 else self.config.overlap_fraction,
             )
             hits: list[Hit] = []
-            for merged_hit, piece, meta in entries:
+            for merged_hit, piece, meta, assignment in entries:
                 exact = merged_hit.identity_pct >= 99.999 and merged_hit.coverage_pct >= 99.999
                 partial = merged_hit.coverage_pct < thresholds.protein_min_coverage
                 if partial and merged_hit.coverage_pct < thresholds.protein_partial_coverage:
                     continue
                 method = "EXACTX" if exact else ("PARTIALX" if partial else "BLASTX")
+                resolution = "PARTIAL" if partial else "COMPLETE"
+                if any(lo >= merged_hit.query_start and hi <= merged_hit.query_end
+                       for lo, hi in stops.get((merged_hit.qseqid, merged_hit.sseqid,
+                                                merged_hit.strand), ())):
+                    method = resolution = "INTERNAL_STOP"
+                gene = meta.get("gene", merged_hit.sseqid)
+                product = meta.get("product", "")
+                closest, note = "", ""
+                if assignment is not None and assignment.symbol != gene:
+                    # Named by its family (HYDRA-WIN PATCH 5); an allele reference
+                    # stays visible as the closest one.
+                    closest = gene if gene != meta.get("fam_id", gene) else ""
+                    note = assignment.explain(closest)
+                    gene = assignment.symbol
+                if assignment is not None and assignment.name:
+                    product = assignment.name
                 hits.append(Hit(
                     sample=sample, database="protein",
-                    gene=meta.get("gene", merged_hit.sseqid),
+                    gene=gene, closest=closest, note=note,
+                    rule_identity=None if assignment is None else assignment.required_identity,
                     accession=meta.get("accession", ""),
-                    product=meta.get("product", ""),
+                    product=product,
                     element_type=meta.get("element_type", "AMR"),
                     element_subtype=meta.get("element_subtype", "AMR"),
                     drug_class=meta.get("class", ""), subclass=meta.get("subclass", ""),
@@ -571,7 +685,7 @@ class ProteinScreener:
                     strand=merged_hit.strand, coverage=merged_hit.coverage_string,
                     coverage_pct=merged_hit.coverage_pct, identity_pct=merged_hit.identity_pct,
                     gaps=merged_hit.gaps, bitscore=merged_hit.bitscore,
-                    method=method, resolution="PARTIAL" if partial else "COMPLETE",
+                    method=method, resolution=resolution,
                 ))
             # Mosaic PBP-style calls: identity *below* the catalogued cutoff is the signal.
             hits.extend(self._call_susceptible(
@@ -585,7 +699,7 @@ class ProteinScreener:
     def _call_susceptible(sample: str, entries, catalog: MutationCatalog) -> list[Hit]:
         """Report proteins whose divergence from a susceptible reference confers resistance."""
         best: dict[str, tuple] = {}
-        for merged_hit, piece, meta in entries:
+        for merged_hit, piece, meta, *_ in entries:
             accession = meta.get("accession", "")
             if accession not in catalog.susceptible:
                 continue

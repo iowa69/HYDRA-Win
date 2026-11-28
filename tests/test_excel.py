@@ -24,6 +24,12 @@ def _result(name, kpc=True):
         _hit(name, "card", "KPC-2", start=1000, end=1881, contig="plasmid_A", identity=99.9,
              primary=False),
         _hit(name, "ncbi", "blaSHV-11", start=5000, end=5861, strand="-", identity=97.0),
+        # The AMRFinderPlus protein search calls every gene NCBI's catalogue has, so
+        # a real run always has it at these two loci (see hydra_win.calls).
+        _hit(name, "protein", "blaKPC-2", start=1000, end=1881, contig="plasmid_A",
+             method="EXACTX", primary=False),
+        _hit(name, "protein", "blaSHV-11", start=5000, end=5861, strand="-", identity=97.0,
+             method="BLASTX", primary=False),
         _hit(name, "protein", "gyrA", start=9000, end=11600, method="POINTX",
              resolution="POINT", drug_class="QUINOLONE", identity=99.8, note="gyrA_S83I (I)",
              mutation=MutationDetail(
@@ -76,7 +82,7 @@ def test_category_assignment():
     assert cats["ybtS"] == excel.VIRULENCE
     assert cats["IncFIB(K)_1"] == excel.PLASMID
     assert cats["wzx_O25"] == excel.TYPING
-    assert excel.label(result.hits[3]) == "gyrA_S83I"
+    assert excel.label(next(h for h in result.hits if h.gene == "gyrA")) == "gyrA_S83I"
 
 
 def test_genome_workbook(tmp_path):
@@ -137,7 +143,7 @@ def test_genome_workbook(tmp_path):
     assert ybst["Organism"] == excel.ANY_ORGANISM
 
     all_hits = _table(wb["All_hits"])
-    assert len(all_hits) == 7
+    assert len(all_hits) == 9
     assert all(r["Contig"] and r["Start"] and r["End"] and r["Strand"] for r in all_hits)
 
     summary = {r[0]: r[1] for r in wb["Summary"].iter_rows(values_only=True) if r[0]}
@@ -153,7 +159,7 @@ def test_genome_workbook(tmp_path):
     pivot = _table(wb["Pivot"], header_row=5)
     kpc_row = next(r for r in pivot if r["Gene"] == "blaKPC-2")
     assert kpc_row["ncbi"] == 100.0 and kpc_row["card"] == 99.9
-    assert kpc_row["Databases"] == 2
+    assert kpc_row["Databases"] == 3                    # ncbi, card and the protein search
     assert not any(r["Gene"] == "KPC-2" for r in pivot)
     gyr_row = next(r for r in pivot if r["Gene"] == "gyrA_S83I")
     assert gyr_row["protein"] == "S83I"                       # the change, not an identity
@@ -192,7 +198,7 @@ def test_cumulative_workbook(tmp_path):
     assert _table(wb["Plasmids_matrix"], header_row=2)[1]["IncFIB(K)_1"] == 100.0
 
     long = _table(wb["All_hits"])
-    assert len(long) == 12
+    assert len(long) == 15
     assert list(long[0])[0] == "Assembly"
     assert {r["Assembly"] for r in long} == {"g1", "g2"}
 

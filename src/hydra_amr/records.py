@@ -141,6 +141,13 @@ class Hit:
     note: str = ""
     #: What exactly mutated (mutation and disruption calls only); see MutationDetail.
     mutation: MutationDetail | None = None
+    #: HYDRA-WIN PATCH 5 (see VENDORED.txt): the closest reference allele when
+    #: the call is named by its gene family, because AMRFinderPlus names an
+    #: allele only on an exact match; "" otherwise. The note says it in words.
+    closest: str = ""
+    #: HYDRA-WIN PATCH 5: the identity (%) the AMRFinderPlus family rule
+    #: required of this hit; None outside the protein search.
+    rule_identity: float | None = None
     #: The alignment a mutation call was made from, kept only until
     #: engines/lesions.py has described it. Never written out.
     evidence: dict | None = field(default=None, repr=False, compare=False)

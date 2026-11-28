@@ -165,6 +165,7 @@ HIT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("End", "end"),
     ("Strand", "strand"),
     ("Gene", "gene"),
+    ("Closest allele (when named by family)", "closest"),
     ("Database", "database"),
     ("Identity (%)", "identity_pct"),
     ("Coverage (%)", "coverage_pct"),
@@ -457,6 +458,8 @@ def _yes_no(value):
 
 #: The Summary's name for AMR genes found but below the confident-call bar.
 TO_CHECK_TITLE = "AMR genes to check (below the confident-call bar)"
+#: ... and for confident calls only catalogues other than AMRFinderPlus make.
+OTHER_TITLE = "AMR genes in other catalogues only (not counted)"
 
 
 def amr_verdicts(hits: Sequence[Hit]) -> list[tuple["Locus", confidence.Verdict]]:
@@ -473,7 +476,9 @@ def confident_labels(hits: Sequence[Hit]) -> dict[int, str]:
     out: dict[int, str] = {}
     for sample_hits in by_sample.values():
         for locus, verdict in amr_verdicts(sample_hits):
-            if verdict.confident:
+            if not confidence.reported_by_amrfinderplus(locus.calls):
+                text = confidence.NOT_COUNTED
+            elif verdict.confident:
                 text = "confident" + (f" ({verdict.evidence})" if verdict.evidence else "")
             else:
                 text = f"check: {verdict.reason}"
@@ -484,8 +489,24 @@ def confident_labels(hits: Sequence[Hit]) -> dict[int, str]:
     return out
 
 
+def _counted_verdicts(result: SampleResult):
+    """(locus, verdict) for the AMR loci the AMRFinderPlus protein search calls too."""
+    return [(lc, v) for lc, v in amr_verdicts(result.hits)
+            if confidence.reported_by_amrfinderplus(lc.calls)]
+
+
 def _confident_amr(result: SampleResult) -> set[int]:
-    return {id(lc.primary) for lc, v in amr_verdicts(result.hits) if v.confident}
+    return {id(lc.primary) for lc, v in _counted_verdicts(result) if v.confident}
+
+
+def other_catalogue_genes(result: SampleResult) -> list[str]:
+    """'ACRA (megares)' for each confident AMR call AMRFinderPlus does not report."""
+    found = {id(lc.primary) for lc, v in amr_verdicts(result.hits)
+             if v.confident and not confidence.reported_by_amrfinderplus(lc.calls)}
+    seen: "OrderedDict[str, None]" = OrderedDict()
+    for hit in sort_hits(h for h in result.hits if id(h) in found):
+        seen.setdefault(f"{named(hit)} ({hit.database})", None)
+    return list(seen)
 
 
 def primary_genes(result: SampleResult, cat: str) -> list[str]:
@@ -500,13 +521,19 @@ def primary_genes(result: SampleResult, cat: str) -> list[str]:
         keep = _confident_amr(result)
         hits = [h for h in hits if id(h) in keep]
     for hit in hits:
-        seen.setdefault(label(hit), None)
+        seen.setdefault(named(hit), None)
     return list(seen)
+
+
+def named(hit: Hit) -> str:
+    """label(), plus the closest allele of a call named by its family."""
+    closest = getattr(hit, "closest", "")
+    return f"{label(hit)} (closest {closest})" if closest else label(hit)
 
 
 def amr_to_check(result: SampleResult) -> list[str]:
     """'blaTEM-1 (partial: 72.4% of the reference gene)' for each AMR gene below the bar."""
-    reasons = {id(lc.primary): v.reason for lc, v in amr_verdicts(result.hits)
+    reasons = {id(lc.primary): v.reason for lc, v in _counted_verdicts(result)
                if not v.confident}
     seen: "OrderedDict[str, None]" = OrderedDict()
     for hit in sort_hits(h for h in result.hits if id(h) in reasons):
@@ -661,11 +688,13 @@ def write_genome_summary(ws: Worksheet, result: SampleResult, info: RunInfo) -> 
     row = _kv(ws, row, "Confident call", confidence.RULE_TEXT)
     counts = category_counts(result)
     to_check = amr_to_check(result)
+    other = other_catalogue_genes(result)
     for cat, title in COUNT_LABELS.items():
         row = _kv(ws, row, title, counts[cat], colour=CATEGORY_COLOURS[cat])
         if cat == AMR:
             row = _kv(ws, row, TO_CHECK_TITLE, len(to_check),
                       colour=CHECK_FILL if to_check else None)
+            row = _kv(ws, row, OTHER_TITLE, len(other))
     row = _kv(ws, row, "AMR drug classes", len(amr_classes(result)))
     row = _kv(ws, row, "All hits (incl. redundant database calls)", len(result.hits))
 
@@ -678,6 +707,7 @@ def write_genome_summary(ws: Worksheet, result: SampleResult, info: RunInfo) -> 
         if cat == AMR:
             row = _kv(ws, row, f"{TO_CHECK_TITLE} (names)", "; ".join(to_check) or "none",
                       colour=CHECK_FILL if to_check else None)
+            row = _kv(ws, row, f"{OTHER_TITLE} (names)", ", ".join(other) or "none")
     row = _kv(ws, row, "AMR drug classes (names)", ", ".join(amr_classes(result)) or "none")
     row = _kv(ws, row, "AMR drug classes: basis",
               "confident AMR genes and established point mutations / disruptions")
@@ -1067,7 +1097,7 @@ def cumulative_summary_rows(results: Sequence[SampleResult],
               + [_scheme_column(results, s) for s in typing_schemes]
               + list(SCORE_LABELS.values())
               + [COUNT_LABELS[c] + " (n)" for c in COUNT_LABELS] + ["AMR drug classes (n)"]
-              + ["AMR genes", TO_CHECK_TITLE, "Point mutations / disruptions",
+              + ["AMR genes", TO_CHECK_TITLE, OTHER_TITLE, "Point mutations / disruptions",
                  "Virulence genes",
                  "Plasmid replicons", "Contigs", "Total length (bp)", "N50 (bp)", "GC (%)",
                  "Warnings"])
@@ -1086,6 +1116,7 @@ def cumulative_summary_rows(results: Sequence[SampleResult],
         row += [counts[c] for c in COUNT_LABELS] + [len(amr_classes(result))]
         row += [", ".join(primary_genes(result, AMR) + primary_genes(result, STRESS)),
                 "; ".join(amr_to_check(result)),
+                ", ".join(other_catalogue_genes(result)),
                 "; ".join(mutation_lines(result)),
                 ", ".join(primary_genes(result, VIRULENCE)),
                 ", ".join(primary_genes(result, PLASMID))]

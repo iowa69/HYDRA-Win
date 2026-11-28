@@ -56,9 +56,47 @@ upstream src/hydra_amr over this directory and re-apply these hunks.
                     AMRFinderPlus's Burkholderia_cepacia taxgroup, not only
                     B. cepacia itself.
                 tests/test_species.py pins each of these.
+5. engines/families.py (new), engines/protein.py, records.py and
+   typing/lineage.py - the AMRFinderPlus protein search applies
+   AMRFinderPlus's own rule (amr_report.cpp, BlastAlignment::finish and
+   getGeneSymbol) instead of one 90% identity for every protein:
+                  * each gene family's curated identity from fam.tsv (826
+                    families in 2026-10-29.1, from 50% to 99%), walking up
+                    the family hierarchy when a hit fails its own family's,
+                    90% where NCBI curates none; an explicit
+                    --protein-min-identity replaces them all, as amrfinder -i
+                    does;
+                  * an allele name only on an exact match, otherwise the
+                    family's symbol and name (blaKPC, not blaKPC-2 at 99.7%;
+                    fosA, not the node id fosA5_fam), with the closest allele
+                    kept in Hit.closest and in the note;
+                  * a hit assigned to a family NCBI marks non-reportable is
+                    not reported (Salmonella's chromosomal aac(6')-Iy);
+                  * Hit.rule_identity records the identity the passing rule
+                    required, and lineage scores ESBLs by Hit.closest, so the
+                    resistance score is unchanged by the renaming.
+                  * as AMRFinderPlus does: a TTG/GTG/... start codon aligned to
+                    the reference's methionine counts as identical (blastx
+                    reads it as L or V, so exact alleles came out at 99.4%);
+                    a stop codon before the reference's own '*' makes the call
+                    INTERNAL_STOP; a fusion protein is named by all its parts
+                    (aac(6')-Ie/aph(2'')-Ia) and a partial hit to one is not
+                    reported.
+                tests/test_families.py pins each of these;
+                tools/compare_amrfinder.py measures the result against
+                amrfinder itself (docs/amrfinder_comparison.md).
+6. engines/blast.py - merge_hsps() joins two HSPs only when at most
+   MAX_HSP_GAP (60 bp) of query lies between them. Upstream joined them up to
+   about twice the reference length plus 5 kb apart, so the two pieces of a
+   blaZ split by a 5.5 kb insertion became one "complete" blaZ, and the
+   aac(6')-Ie/aph(2'')-Ia gene that was the insertion was filed as a duplicate
+   of it. Now the larger piece is reported, as partial, which is what
+   AMRFinderPlus reports. Both gene searches (nucl.py, protein.py) use it.
+                tests/test_merging.py pins it.
 
-Patches 3 and 4 belong upstream: they are needed by any Hydra that has more
-than Kleborate's sketch, and on Linux too.
+Patches 3 to 6 belong upstream: 3 and 4 are needed by any Hydra that has more
+than Kleborate's sketch, and 5 and 6 by any Hydra that reports AMRFinderPlus or
+gene calls, on Linux too.
 
 The mutation detail that v0.3.0 carried as a local patch is upstream code on
 the vendored branch (pull request #2), with the identical engine, and
