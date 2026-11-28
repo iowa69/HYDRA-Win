@@ -165,6 +165,9 @@ HIT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("End", "end"),
     ("Strand", "strand"),
     ("Gene", "gene"),
+    # The verdict sits next to the name, so no reader takes a gene to check or
+    # one only another catalogue lists for a detection.
+    ("Confident call", "_confident"),
     ("Closest allele (when named by family)", "closest"),
     ("Database", "database"),
     ("Identity (%)", "identity_pct"),
@@ -180,7 +183,6 @@ HIT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("Reference span", "coverage"),
     ("Gaps", "gaps"),
     ("Primary call", "primary"),
-    ("Confident call", "_confident"),
     ("Note", "note"),
 )
 
@@ -359,7 +361,15 @@ def write_hit_table(ws: Worksheet, hits: Sequence[Hit], *, leading: Sequence[tup
     means) first; ``with_mutation_summary`` adds a one-line description of each
     mutation call after the category (All_hits).
     """
-    raw = [(t, a) for t, a in HIT_COLUMNS if not (mutations and a in _MUTATION_RAW_SKIP)]
+    plain = [item[0] if isinstance(item, tuple) else item for item in hits]
+    # A sheet with no AMR hit (Virulence, Plasmids, Point_mutations) would show
+    # the verdict column empty on every row: leave it out there.
+    judged = any(category(h) == AMR for h in plain)
+
+    def kept(attr: str) -> bool:
+        return not (mutations and attr in _MUTATION_RAW_SKIP) and (attr != "_confident" or judged)
+
+    raw = [(t, a) for t, a in HIT_COLUMNS if kept(a)]
     lead_titles = [title for title, _ in leading]
     mutation_titles = [t for t, _f, _w in MUTATION_COLUMNS] if mutations else []
     titles = (lead_titles + (["Category"] if with_category else [])
@@ -367,7 +377,7 @@ def write_hit_table(ws: Worksheet, hits: Sequence[Hit], *, leading: Sequence[tup
               + mutation_titles + [t for t, _ in raw])
     _write_header(ws, 1, titles)
     identity_col = titles.index("Identity (%)") + 1
-    labels = confident_labels([item[0] if isinstance(item, tuple) else item for item in hits])
+    labels = confident_labels(plain)
     row = 1
     for item in hits:
         hit, lead_values = (item if isinstance(item, tuple) else (item, ()))
@@ -377,7 +387,7 @@ def write_hit_table(ws: Worksheet, hits: Sequence[Hit], *, leading: Sequence[tup
                   + (mutation_values(hit) if mutations else [])
                   + [v for (t, a), v in zip(HIT_COLUMNS,
                                             hit_values(hit, labels.get(id(hit), "")))
-                     if not (mutations and a in _MUTATION_RAW_SKIP)])
+                     if kept(a)])
         for col, value in enumerate(values, start=1):
             cell = ws.cell(row=row, column=col, value=value)
             cell.border = CELL_BORDER

@@ -301,3 +301,23 @@ def test_the_settings_dialog_says_other_catalogues_alone_are_not_counted():
     from hydra_win import core
 
     assert "only other catalogues" in core.explain_automatic()
+
+
+# ---- easy to read -------------------------------------------------------------
+def test_the_verdict_sits_next_to_the_gene_name(tmp_path):
+    path, _ = _summary(tmp_path, _with_megares_only())
+    header = [c.value for c in load_workbook(path)["AMR_genes"][1]]
+    assert header[header.index("Gene") + 1] == "Confident call"
+
+
+def test_a_sheet_without_amr_hits_has_no_verdict_column(tmp_path):
+    path, _ = _summary(tmp_path, _with_megares_only())
+    for sheet in ("Virulence", "Plasmids", "Point_mutations"):
+        header = [c.value for c in load_workbook(path)[sheet][1]]
+        assert "Confident call" not in header, sheet
+
+
+def test_a_reason_rounds_its_percentage():
+    verdict = calls.judge([_hit("g", "ncbi", "sul1", start=1, end=530, coverage=63.7681,
+                                resolution="PARTIAL")])
+    assert verdict.reason == "partial: 63.8% of the reference gene"

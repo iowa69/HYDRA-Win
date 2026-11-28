@@ -136,6 +136,11 @@ def _clears(hit: Hit) -> bool:
             and float(hit.coverage_pct) >= CONFIDENT_COVERAGE)
 
 
+def _pct(value) -> str:
+    """63.7681 -> '63.8': one decimal is all a reader needs, and 100 stays 100."""
+    return f"{round(float(value), 1):g}"
+
+
 def _why_not(hit: Hit) -> str:
     if _contig_end(hit):
         return NOT_ESTABLISHED["CONTIG_END"]
@@ -145,12 +150,12 @@ def _why_not(hit: Hit) -> str:
         return (f"interrupted: the match is split by {inserted_bases(hit)} bp of other "
                 "sequence (an insertion), so the gene may not be functional")
     if hit.resolution == "PARTIAL" or float(hit.coverage_pct) < CONFIDENT_COVERAGE:
-        return f"partial: {float(hit.coverage_pct):g}% of the reference gene"
+        return f"partial: {_pct(hit.coverage_pct)}% of the reference gene"
     if getattr(hit, "rule_identity", None) is not None:
-        return (f"{float(hit.identity_pct):g}% identity, below the "
+        return (f"{_pct(hit.identity_pct)}% identity, below the "
                 f"{required_identity(hit):g}% NCBI requires for this gene family: a related "
                 "gene, not necessarily this one")
-    return (f"{float(hit.identity_pct):g}% identity: a related gene, not necessarily "
+    return (f"{_pct(hit.identity_pct)}% identity: a related gene, not necessarily "
             "this one")
 
 
@@ -169,6 +174,6 @@ def judge(hits: Sequence[Hit]) -> Verdict:
         return Verdict(False, _why_not(first))
     for other in hits[1:]:
         if _clears(other):
-            return Verdict(True, evidence=(f"{other.database}: {float(other.identity_pct):g}% "
-                                           f"identity, {float(other.coverage_pct):g}% coverage"))
+            return Verdict(True, evidence=(f"{other.database}: {_pct(other.identity_pct)}% "
+                                           f"identity, {_pct(other.coverage_pct)}% coverage"))
     return Verdict(False, _why_not(first))
